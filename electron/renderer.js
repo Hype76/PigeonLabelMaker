@@ -22,6 +22,10 @@ const state = {
   selectedItem: null,
   dragContext: null,
   canvasBackground: "",
+  inlineEditor: null,
+  editingItemIndex: null,
+  lastCanvasClickIndex: null,
+  lastCanvasClickAt: 0,
 };
 
 const elements = {};
@@ -86,6 +90,42 @@ function openHelp() {
 
 function closeHelp() {
   elements.helpOverlay.classList.add("hidden");
+}
+
+function applySidebarSectionState(section, expanded) {
+  section.classList.toggle("collapsed", !expanded);
+  const toggle = section.querySelector(".section-toggle");
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  }
+}
+
+function loadSidebarSectionState(sectionId) {
+  const saved = localStorage.getItem(`sidebar_section_${sectionId}`);
+  if (saved) {
+    return saved !== "collapsed";
+  }
+  return sectionId === "brand" || sectionId === "designer";
+}
+
+function initSidebarCollapsibles() {
+  document.querySelectorAll(".sidebar-section").forEach((section) => {
+    const sectionId = section.dataset.sectionId;
+    const toggle = section.querySelector(".section-toggle");
+    if (!sectionId || !toggle) {
+      return;
+    }
+
+    applySidebarSectionState(section, loadSidebarSectionState(sectionId));
+    toggle.addEventListener("click", () => {
+      const expanded = section.classList.contains("collapsed");
+      applySidebarSectionState(section, expanded);
+      localStorage.setItem(
+        `sidebar_section_${sectionId}`,
+        expanded ? "expanded" : "collapsed"
+      );
+    });
+  });
 }
 
 async function loadFonts() {
@@ -348,6 +388,12 @@ function canvasItemText(item) {
   return item.text || "Text";
 }
 
+function normalizeInlineEditorText(value) {
+  return String(value || "")
+    .replaceAll("\r", "")
+    .replaceAll("\n", "");
+}
+
 function escapeSvgText(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -356,7 +402,7 @@ function escapeSvgText(value) {
     .replaceAll("\"", "&quot;");
 }
 
-function qrSvgDataUri(text) {
+function fallbackQrSvgMarkup(text) {
   const content = text || "QR";
   let hash = 0;
   for (const char of content) {
@@ -377,11 +423,26 @@ function qrSvgDataUri(text) {
     }
   }
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges"><rect width="${size}" height="${size}" fill="#ffffff"/>${cells.join("")}</svg>`;
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges"><rect width="${size}" height="${size}" fill="#ffffff"/>${cells.join("")}</svg>`;
 }
 
-function barcodeSvgDataUri(text) {
+function qrSvgMarkup(text) {
+  const content = String(text || "QR");
+  try {
+    const svg = window.pigeonApi?.renderQrSvg?.(content);
+    if (svg) {
+      return svg;
+    }
+  } catch (_error) {
+  }
+  return fallbackQrSvgMarkup(content);
+}
+
+function qrSvgDataUri(text) {
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(qrSvgMarkup(text))}`;
+}
+
+function barcodeSvgMarkup(text) {
   const content = text || "BARCODE";
   let x = 4;
   const bars = [];
@@ -392,8 +453,11 @@ function barcodeSvgDataUri(text) {
     bars.push(`<rect x="${x}" y="4" width="${barWidth}" height="52" fill="#111111" />`);
     x += barWidth + gap;
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Math.max(80, x + 4)} 68"><rect width="100%" height="100%" fill="#ffffff"/>${bars.join("")}<text x="50%" y="64" text-anchor="middle" font-family="Arial" font-size="8" fill="#111111">${escapeSvgText(content)}</text></svg>`;
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Math.max(80, x + 4)} 68"><rect width="100%" height="100%" fill="#ffffff"/>${bars.join("")}<text x="50%" y="64" text-anchor="middle" font-family="Arial" font-size="8" fill="#111111">${escapeSvgText(content)}</text></svg>`;
+}
+
+function barcodeSvgDataUri(text) {
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(barcodeSvgMarkup(text))}`;
 }
 
 function generatePreviewImage(item) {
@@ -405,6 +469,16 @@ function generatePreviewImage(item) {
   }
   if (item.type === "image") {
     return item.imageData || "";
+  }
+  return "";
+}
+
+function generatePreviewMarkup(item) {
+  if (item.type === "qr") {
+    return qrSvgMarkup(item.text);
+  }
+  if (item.type === "barcode") {
+    return barcodeSvgMarkup(item.text);
   }
   return "";
 }
@@ -433,6 +507,44 @@ function syncSelectedItemControls() {
   elements.fontSizeInput.disabled = item.type !== "text";
   elements.layer1Mode.value =
     item.type === "text" ? "Text" : item.type === "qr" ? "QR" : item.type === "barcode" ? "Barcode" : "Text";
+}
+
+function commitSelectedFontSize(rawValue, options = {}) {
+  const { restoreIfEmpty = false } = options;
+  if (state.selectedItem === null) {
+    return;
+  }
+
+  const item = state.canvasItems[state.selectedItem];
+  if (!item || item.type !== "text") {
+    return;
+  }
+
+  const value = String(rawValue ?? "").trim();
+  if (!value) {
+    if (restoreIfEmpty) {
+      const fallback = Math.max(6, Number(item.fontSize) || 50);
+      elements.fontSizeInput.value = String(fallback);
+    }
+    return;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    if (restoreIfEmpty) {
+      elements.fontSizeInput.value = String(Math.max(6, Number(item.fontSize) || 50));
+    }
+    return;
+  }
+
+  const size = Math.max(6, numeric);
+  item.fontSize = size;
+  elements.fontSizeInput.value = String(size);
+  clearError();
+  syncCanvasIntoSettings();
+  renderCanvasFromState();
+  queueSave();
+  queuePreview();
 }
 
 function syncCanvasIntoSettings() {
@@ -557,6 +669,7 @@ async function captureCanvasImage() {
           element?.classList?.contains("resize-handle") ||
           element?.classList?.contains("rotate-handle") ||
           element?.classList?.contains("rotate-line") ||
+          element?.classList?.contains("edit-btn") ||
           element?.classList?.contains("delete-btn")
         ),
     });
@@ -745,6 +858,7 @@ function applyStickyBounds(item, canvas, el = null) {
 
 function renderCanvasFromState() {
   const canvas = elements.designCanvas;
+  state.inlineEditor = null;
   canvas.querySelectorAll(".canvas-item").forEach((item) => item.remove());
   canvas.style.backgroundImage = "none";
 
@@ -763,7 +877,7 @@ function renderCanvasFromState() {
     el.style.overflow = "hidden";
     el.style.textAlign = "center";
     el.style.lineHeight = "1.05";
-    el.style.padding = "4px";
+    el.style.padding = item.type === "text" ? "4px" : "0";
     el.style.pointerEvents = "auto";
     el.style.transform = `rotate(${item.rotation || 0}deg)`;
     el.style.transformOrigin = "center center";
@@ -778,7 +892,7 @@ function renderCanvasFromState() {
       } else {
         fitTextToBox(el, item);
       }
-    } else {
+    } else if (item.type === "image") {
       const image = document.createElement("img");
       image.src = generatePreviewImage(item);
       image.alt = item.type;
@@ -787,38 +901,121 @@ function renderCanvasFromState() {
       image.style.height = "100%";
       image.style.objectFit = "contain";
       el.appendChild(image);
+    } else {
+      const wrapper = document.createElement("div");
+      wrapper.className = "canvas-vector-preview";
+      wrapper.innerHTML = generatePreviewMarkup(item);
+      el.appendChild(wrapper);
+    }
+
+    if (state.editingItemIndex === index && item.type !== "image") {
+      el.classList.add("editing");
+      el.contentEditable = "true";
+      el.spellcheck = false;
+      el.innerText = item.text || "";
+      el.addEventListener("mousedown", (e) => {
+        e.stopPropagation();
+      });
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+      });
+      el.addEventListener("input", () => {
+        const nextText = normalizeInlineEditorText(el.innerText);
+        if (el.innerText !== nextText) {
+          el.innerText = nextText;
+          const selection = window.getSelection();
+          if (selection) {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        }
+        item.text = nextText;
+        if (state.selectedItem === index) {
+          elements.layer1Text.value = nextText;
+        }
+        syncCanvasIntoSettings();
+        queueSave();
+        queuePreview();
+      });
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          closeInlineEditor({ cancel: true });
+          return;
+        }
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          closeInlineEditor();
+        }
+      });
+      el.addEventListener("blur", () => {
+        closeInlineEditor();
+      });
+      state.inlineEditor = el;
     }
 
     if (index === state.selectedItem) {
       el.classList.add("selected");
-      const handle = document.createElement("div");
-      handle.className = "resize-handle br";
-      makeResizable(el, item, handle, index);
-      el.appendChild(handle);
+      if (state.editingItemIndex !== index) {
+        const handle = document.createElement("button");
+        handle.type = "button";
+        handle.className = "resize-handle br";
+        handle.setAttribute("aria-label", "Resize item");
+        handle.title = "Resize";
+        handle.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 13l6-6M10 13h3v-3"/><path d="M13 7H7v6"/></svg>`;
+        makeResizable(el, item, handle, index);
+        el.appendChild(handle);
 
-      const rotateLine = document.createElement("div");
-      rotateLine.className = "rotate-line";
+        const rotateLine = document.createElement("div");
+        rotateLine.className = "rotate-line";
 
-      const rotateHandle = document.createElement("div");
-      rotateHandle.className = "rotate-handle";
-      makeRotatable(el, item, rotateHandle, index);
+        const rotateHandle = document.createElement("div");
+        rotateHandle.className = "rotate-handle";
+        rotateHandle.setAttribute("title", "Rotate");
+        rotateHandle.setAttribute("aria-label", "Rotate item");
+        makeRotatable(el, item, rotateHandle, index);
 
-      el.appendChild(rotateLine);
-      el.appendChild(rotateHandle);
+        el.appendChild(rotateLine);
+        el.appendChild(rotateHandle);
 
-      const del = document.createElement("div");
-      del.className = "delete-btn";
-      del.innerHTML = "&times;";
-      del.addEventListener("mousedown", (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        deleteItem(index);
-      });
-      el.appendChild(del);
+        if (item.type !== "image") {
+          const edit = document.createElement("button");
+          edit.type = "button";
+          edit.className = "edit-btn";
+          edit.setAttribute("aria-label", "Edit item");
+          edit.title = "Edit";
+          edit.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 14.6V16h1.4L14 7.4 12.6 6 4 14.6Z"/><path d="M11.9 6.7 13.3 8.1"/><path d="M12.6 6l1.2-1.2a1.4 1.4 0 0 1 2 0l.4.4a1.4 1.4 0 0 1 0 2L15 8.4"/></svg>`;
+          edit.addEventListener("click", (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            openInlineEditor(index);
+          });
+          el.appendChild(edit);
+        }
+
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "delete-btn";
+        del.setAttribute("aria-label", "Delete item");
+        del.title = "Delete";
+        del.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 6l8 8"/><path d="M14 6l-8 8"/></svg>`;
+        del.addEventListener("click", (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          deleteItem(index);
+        });
+        el.appendChild(del);
+      }
     }
 
     el.addEventListener("click", (e) => {
       e.stopPropagation();
+      if (state.editingItemIndex === index) {
+        return;
+      }
       selectItem(index);
     });
 
@@ -827,6 +1024,17 @@ function renderCanvasFromState() {
     });
 
   syncSelectedItemControls();
+  if (state.inlineEditor) {
+    state.inlineEditor.focus();
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(state.inlineEditor);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
 }
 
 function deleteItem(index) {
@@ -926,11 +1134,57 @@ function selectItem(index) {
   renderCanvasFromState();
 }
 
+function openInlineEditor(index) {
+  const item = state.canvasItems[index];
+  if (!item || item.type === "image") {
+    return;
+  }
+
+  state.selectedItem = index;
+  state.lastCanvasClickIndex = null;
+  state.lastCanvasClickAt = 0;
+  state.editingItemIndex = index;
+  renderCanvasFromState();
+  requestAnimationFrame(() => {
+    state.inlineEditor?.focus();
+  });
+}
+
+function closeInlineEditor(options = {}) {
+  const { cancel = false } = options;
+  const index = state.editingItemIndex;
+  if (index === null) {
+    return;
+  }
+
+  const item = state.canvasItems[index];
+  const editorValue = normalizeInlineEditorText(state.inlineEditor?.innerText);
+  state.editingItemIndex = null;
+  state.inlineEditor = null;
+
+  if (!cancel && item) {
+    item.text = editorValue ?? item.text;
+    syncCanvasIntoSettings();
+    syncSelectedItemControls();
+    queueSave();
+    triggerPreviewAfterInteraction();
+  }
+
+  renderCanvasFromState();
+}
+
 function makeDraggable(el, item, index) {
   el.addEventListener("mousedown", (e) => {
-    if (e.target.closest(".resize-handle")) {
+    if (
+      e.target.closest(".resize-handle") ||
+      e.target.closest(".rotate-handle") ||
+      e.target.closest(".delete-btn") ||
+      e.target.closest(".edit-btn") ||
+      e.target.closest(".canvas-inline-editor")
+    ) {
       return;
     }
+
     e.preventDefault();
     state.isCanvasInteracting = true;
     state.selectedItem = index;
@@ -1517,6 +1771,7 @@ function forceSimpleDefaults() {
     state.settings.output_mode = "Printer";
   }
   state.settings.baud_rate = 115200;
+  state.settings.invert = false;
 }
 
 function readFormIntoState() {
@@ -1650,15 +1905,32 @@ async function updatePreview(options = {}) {
   if (state.busy && !force) {
     return;
   }
+  const isInlineEditing = state.editingItemIndex !== null && Boolean(state.inlineEditor);
   try {
-    setStatus("Updating...");
-    elements.designCanvas.style.opacity = "0.6";
-    elements.printPreview.style.opacity = "0.6";
-    readFormIntoState();
-    updateCanvasSurface();
-    updatePrintPreviewOrientation();
-    buildCanvasItemsFromSettings();
-    renderCanvasFromState();
+    if (!isInlineEditing) {
+      setStatus("Updating...");
+      elements.designCanvas.style.opacity = "0.6";
+      elements.printPreview.style.opacity = "0.6";
+    }
+    if (state.editingItemIndex !== null && state.inlineEditor) {
+      const editingItem = state.canvasItems[state.editingItemIndex];
+      if (editingItem && editingItem.type !== "image") {
+        const liveText = normalizeInlineEditorText(state.inlineEditor.innerText);
+        editingItem.text = liveText;
+        if (state.selectedItem === state.editingItemIndex) {
+          elements.layer1Text.value = liveText;
+        }
+        syncCanvasIntoSettings();
+      }
+      updateCanvasSurface();
+      updatePrintPreviewOrientation();
+    } else {
+      readFormIntoState();
+      updateCanvasSurface();
+      updatePrintPreviewOrientation();
+      buildCanvasItemsFromSettings();
+      renderCanvasFromState();
+    }
     const imageData = await captureCanvasImage();
     const result = await safeRequest("preview", {
       settings: buildRasterRenderSettings(),
@@ -1667,12 +1939,16 @@ async function updatePreview(options = {}) {
     elements.printPreview.src = result.printImage;
     elements.designCanvas.style.opacity = "1";
     elements.printPreview.style.opacity = "1";
-    setStatus("Preview updated");
+    if (!isInlineEditing) {
+      setStatus("Preview updated");
+    }
   } catch (error) {
     elements.designCanvas.style.opacity = "1";
     elements.printPreview.style.opacity = "1";
     log(`Preview failed: ${error.message}`);
-    setStatus("Preview failed");
+    if (!isInlineEditing) {
+      setStatus("Preview failed");
+    }
   }
 }
 
@@ -1946,13 +2222,25 @@ function attachFormListeners() {
       if (state.selectedItem === null) {
         return;
       }
-      const size = Math.max(6, Number(elements.fontSizeInput.value) || 0);
-      state.canvasItems[state.selectedItem].fontSize = size;
-      clearError();
-      syncCanvasIntoSettings();
-      renderCanvasFromState();
-      queueSave();
-      queuePreview();
+      const value = String(elements.fontSizeInput.value ?? "").trim();
+      if (!value) {
+        return;
+      }
+
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric < 6) {
+        return;
+      }
+
+      commitSelectedFontSize(value);
+    });
+
+    elements.fontSizeInput.addEventListener("change", () => {
+      commitSelectedFontSize(elements.fontSizeInput.value, { restoreIfEmpty: true });
+    });
+
+    elements.fontSizeInput.addEventListener("blur", () => {
+      commitSelectedFontSize(elements.fontSizeInput.value, { restoreIfEmpty: true });
     });
 
     elements.systemFontToggle.addEventListener("change", async () => {
@@ -2063,6 +2351,7 @@ function attachFormListeners() {
 async function boot() {
     loadTheme();
     initElements();
+    initSidebarCollapsibles();
     attachCanvasInteractions();
     loadMode();
     state.useSystemFonts = localStorage.getItem("use_system_fonts") === "true";
@@ -2077,6 +2366,7 @@ async function boot() {
     state.settings.output_mode = "Printer";
     state.settings.port = "";
     state.settings.baud_rate = 115200;
+    state.settings.invert = false;
     state.settings.ble_device_address = "";
     state.settings.ble_device_name = "";
     state.bleState = { connected: false, address: "", name: "" };

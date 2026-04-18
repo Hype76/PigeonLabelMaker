@@ -10,66 +10,109 @@
   <body>
     <div class="shell">
       <aside class="sidebar">
-        <div class="brand-card">
-          <div class="theme-toggle">
-            <button id="themeToggle" class="ghost small">Toggle Theme</button>
-          </div>
-          <div class="mode-toggle">
-            <button id="modeToggle" class="ghost small">Advanced</button>
-          </div>
-          <div class="mode-toggle">
-            <button id="helpButton" class="ghost small">Help</button>
-          </div>
-          <p class="eyebrow">Electron Studio</p>
-          <h1>Pigeon Label Maker</h1>
-          <p class="subtitle">Fast, simple label printing</p>
-          <div class="brand-strip"></div>
-          <div class="status-row">
-            <span id="appStatus" class="status-pill">Starting</span>
-            <span id="bleStatus" class="status-pill muted">BLE disconnected</span>
+        <div class="brand-card sidebar-section" data-section-id="brand">
+          <button class="section-toggle brand-section-toggle" type="button" aria-expanded="true">
+            <span>App</span>
+            <span class="section-chevron" aria-hidden="true"></span>
+          </button>
+          <div class="section-body">
+            <div class="brand-actions">
+              <button id="themeToggle" class="ghost small">Toggle Theme</button>
+              <button id="modeToggle" class="ghost small">Advanced</button>
+              <button id="helpButton" class="ghost small">Help</button>
+            </div>
+            <p class="eyebrow">Electron Studio</p>
+            <h1>Pigeon Label Maker</h1>
+            <p class="subtitle">Fast, simple label printing</p>
+            <div class="brand-strip"></div>
+            <div class="status-row">
+              <span id="appStatus" class="status-pill">Starting</span>
+              <span id="bleStatus" class="status-pill muted">BLE disconnected</span>
+            </div>
           </div>
         </div>
 
-        <section class="panel">
-          <div class="panel-head">
+        <section class="panel sidebar-section" data-section-id="template">
+          <button class="panel-head section-toggle" type="button" aria-expanded="true">
             <h2>Template</h2>
-          </div>
+            <span class="section-chevron" aria-hidden="true"></span>
+          </button>
 
-          <div class="template-grid">
-            <button data-template="text" type="button">Text</button>
-            <button data-template="dual" type="button">Dual</button>
-            <button data-template="qr" type="button">QR</button>
-            <button data-template="barcode" type="button">Barcode</button>
+          <div class="section-body">
+            <div class="template-grid">
+              <button data-template="text" type="button">Text</button>
+              <button data-template="dual" type="button">Dual</button>
+              <button data-template="qr" type="button">QR</button>
+              <button data-template="barcode" type="button">Barcode</button>
+            </div>
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
+        <section class="panel sidebar-section" data-section-id="designer">
+          <button class="panel-head section-toggle" type="button" aria-expanded="true">
             <h2>Designer</h2>
-          </div>
-          <div class="tool-grid">
-            <button id="addTextButton" class="ghost" type="button">Add Text</button>
-            <button id="addQrButton" class="ghost" type="button">Add QR</button>
-            <button id="addBarcodeButton" class="ghost" type="button">Add Barcode</button>
-            <button id="addImageButton" class="ghost" type="button">Add Image</button>
-          </div>
-          <div class="align-controls top-gap">
-            <button data-align="left" class="ghost" type="button">L</button>
-            <button data-align="center" class="ghost" type="button">C</button>
-            <button data-align="right" class="ghost" type="button">R</button>
-            <button data-align="top" class="ghost" type="button">T</button>
-            <button data-align="middle" class="ghost" type="button">M</button>
-            <button data-align="bottom" class="ghost" type="button">B</button>
-          </div>
-          <input id="imageUpload" type="file" accept="image/*" class="hidden" />
-          <div class="grid two top-gap">
-            <button id="saveDesignButton" class="ghost" type="button">Save Design</button>
-            <button id="loadDesignButton" class="ghost" type="button">Load Design</button>
-          </div>
-          <label class="field">
-            <span>Selected Content</span>
-            <input id="layer1Text" type="text" placeholder="Edit selected item" />
-          </label>
+            <span class="section-chevron" aria-hidden="true"></span>
+          </button>
+          <div class="section-body">
+            <label class="field">
+              <span>YOUR TEXT</span>
+              <input id="layer1Text" type="text" placeholder="Edit selected item" />
+            </label>
+            <div class="tool-grid">
+              <button id="addTextButton" class="ghost" type="button">Add Text</button>
+              <button id="addQrButton" class="ghost" type="button">Add QR</button>
+              <button id="addBarcodeButton" class="ghost" type="button">Add Barcode</button>
+              <button id="addImageButton" class="ghost" type="button">Add Image</button>
+            </div>
+            <div class="align-controls top-gap">
+            <button data-align="left" class="ghost" type="button" aria-label="Align left" title="Align left">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M4 3v14" />
+                <rect x="4" y="5" width="9" height="3" rx="1" />
+                <rect x="4" y="12" width="12" height="3" rx="1" />
+              </svg>
+            </button>
+            <button data-align="center" class="ghost" type="button" aria-label="Align center" title="Align center">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M10 3v14" />
+                <rect x="5.5" y="5" width="9" height="3" rx="1" />
+                <rect x="4" y="12" width="12" height="3" rx="1" />
+              </svg>
+            </button>
+            <button data-align="right" class="ghost" type="button" aria-label="Align right" title="Align right">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M16 3v14" />
+                <rect x="7" y="5" width="9" height="3" rx="1" />
+                <rect x="4" y="12" width="12" height="3" rx="1" />
+              </svg>
+            </button>
+            <button data-align="top" class="ghost" type="button" aria-label="Align top" title="Align top">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M3 4h14" />
+                <rect x="5" y="4" width="3" height="9" rx="1" />
+                <rect x="12" y="4" width="3" height="12" rx="1" />
+              </svg>
+            </button>
+            <button data-align="middle" class="ghost" type="button" aria-label="Align middle" title="Align middle">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M3 10h14" />
+                <rect x="5" y="5.5" width="3" height="9" rx="1" />
+                <rect x="12" y="4" width="3" height="12" rx="1" />
+              </svg>
+            </button>
+            <button data-align="bottom" class="ghost" type="button" aria-label="Align bottom" title="Align bottom">
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M3 16h14" />
+                <rect x="5" y="7" width="3" height="9" rx="1" />
+                <rect x="12" y="4" width="3" height="12" rx="1" />
+              </svg>
+            </button>
+            </div>
+            <input id="imageUpload" type="file" accept="image/*" class="hidden" />
+            <div class="grid two top-gap">
+              <button id="saveDesignButton" class="ghost" type="button">Save Design</button>
+              <button id="loadDesignButton" class="ghost" type="button">Load Design</button>
+            </div>
             <div class="grid two">
               <div class="advanced">
                 <label class="field">
@@ -142,61 +185,71 @@
               <div class="copies-control">
                 <button id="copiesMinus" class="ghost small" type="button">-</button>
                 <input id="copies" type="number" min="1" value="1" />
-              <button id="copiesPlus" class="ghost small" type="button">+</button>
-            </div>
-          </label>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Recent</h2>
-          </div>
-
-          <div id="recentLabels" class="recent-list"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Size</h2>
-          </div>
-
-          <div class="size-grid">
-            <button data-size="40x14" type="button">40x14</button>
-            <button data-size="50x20" type="button">50x20</button>
-            <button data-size="30x30" type="button">30x30</button>
-          </div>
-          <div class="grid two top-gap">
-            <input id="customWidth" type="number" placeholder="Width mm" />
-            <input id="customHeight" type="number" placeholder="Height mm" />
-          </div>
-          <button id="applyCustomSize" class="ghost top-gap" type="button">Apply</button>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Connection</h2>
-          </div>
-          <div class="grid two connection-block">
-            <label class="field">
-              <span>COM Port</span>
-              <select id="portSelect"></select>
+                <button id="copiesPlus" class="ghost small" type="button">+</button>
+              </div>
             </label>
           </div>
-          <div class="advanced">
-            <button id="refreshPortsButton" class="ghost top-gap">Refresh Ports</button>
+        </section>
+
+        <section class="panel sidebar-section" data-section-id="recent">
+          <button class="panel-head section-toggle" type="button" aria-expanded="true">
+            <h2>Recent</h2>
+            <span class="section-chevron" aria-hidden="true"></span>
+          </button>
+
+          <div class="section-body">
+            <div id="recentLabels" class="recent-list"></div>
           </div>
-          <div class="panel-head top-gap">
-            <h2>BLE</h2>
+        </section>
+
+        <section class="panel sidebar-section" data-section-id="size">
+          <button class="panel-head section-toggle" type="button" aria-expanded="true">
+            <h2>Size</h2>
+            <span class="section-chevron" aria-hidden="true"></span>
+          </button>
+
+          <div class="section-body">
+            <div class="size-grid">
+              <button data-size="40x14" type="button">40x14</button>
+              <button data-size="50x20" type="button">50x20</button>
+              <button data-size="30x30" type="button">30x30</button>
+            </div>
+            <div class="grid two top-gap">
+              <input id="customWidth" type="number" placeholder="Width mm" />
+              <input id="customHeight" type="number" placeholder="Height mm" />
+            </div>
+            <button id="applyCustomSize" class="ghost top-gap" type="button">Apply</button>
           </div>
-          <div class="grid two connection-block">
-            <button id="scanBleButton" class="ghost">Scan</button>
-            <button id="connectBleButton" class="ghost">Connect</button>
-            <button id="disconnectBleButton" class="ghost ble-disconnect">Disconnect</button>
+        </section>
+
+        <section class="panel sidebar-section" data-section-id="connection">
+          <button class="panel-head section-toggle" type="button" aria-expanded="true">
+            <h2>Connection</h2>
+            <span class="section-chevron" aria-hidden="true"></span>
+          </button>
+          <div class="section-body">
+            <div class="grid two connection-block">
+              <label class="field">
+                <span>COM Port</span>
+                <select id="portSelect"></select>
+              </label>
+            </div>
+            <div class="advanced">
+              <button id="refreshPortsButton" class="ghost top-gap">Refresh Ports</button>
+            </div>
+            <div class="panel-head top-gap">
+              <h2>BLE</h2>
+            </div>
+            <div class="grid two connection-block">
+              <button id="scanBleButton" class="ghost">Scan</button>
+              <button id="connectBleButton" class="ghost">Connect</button>
+              <button id="disconnectBleButton" class="ghost ble-disconnect">Disconnect</button>
+            </div>
+            <label class="field top-gap">
+              <span>Device</span>
+              <select id="bleDeviceSelect"></select>
+            </label>
           </div>
-          <label class="field top-gap">
-            <span>Device</span>
-            <select id="bleDeviceSelect"></select>
-          </label>
         </section>
       </aside>
 
@@ -280,6 +333,14 @@
           <li>Use Test Print to check connection</li>
           <li>Use Recent labels to reuse text</li>
           <li>Preview shows exact output</li>
+        </ul>
+
+        <h3>Canvas Controls</h3>
+        <ul>
+          <li>Pencil icon edits the selected item</li>
+          <li>Red X deletes the selected item</li>
+          <li>Bottom-right control resizes the item</li>
+          <li>Top handle rotates the item</li>
         </ul>
 
         <button id="closeHelp" class="primary">Close</button>

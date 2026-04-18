@@ -133,15 +133,58 @@ body {
   background: var(--brand-overlay), var(--panel-strong);
 }
 
-.theme-toggle {
-  display: flex;
-  justify-content: flex-end;
+.sidebar-section.collapsed {
+  padding-bottom: 10px;
 }
 
-.mode-toggle {
+.section-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.brand-section-toggle {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.section-chevron {
+  width: 10px;
+  height: 10px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+  flex: 0 0 auto;
+}
+
+.sidebar-section.collapsed .section-chevron {
+  transform: rotate(-45deg);
+}
+
+.section-body {
+  min-width: 0;
+}
+
+.sidebar-section.collapsed .section-body {
+  display: none;
+}
+
+.brand-actions {
+  display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
-  margin-top: 8px;
+  gap: 8px;
   margin-bottom: 18px;
 }
 
@@ -238,6 +281,20 @@ body {
 .panel-head h2 {
   font-size: 0.9rem;
   margin-bottom: 6px;
+}
+
+button.panel-head {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.panel-head h2 {
+  margin-bottom: 0;
 }
 
 .brand-card h1 {
@@ -376,6 +433,27 @@ body {
   min-height: 28px;
   padding: 0;
   font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.align-controls button svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: currentColor;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.align-controls button path {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.align-controls button rect {
+  stroke: none;
 }
 
 .recent-list {
@@ -797,22 +875,63 @@ button:disabled {
   user-select: none;
 }
 
+.canvas-vector-preview {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.canvas-vector-preview svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  shape-rendering: crispEdges;
+  image-rendering: pixelated;
+}
+
 .canvas-item.selected {
   outline: 2px dashed var(--accent);
+  overflow: visible;
+}
+
+.canvas-item.editing {
+  cursor: text;
+  outline: 2px solid var(--accent);
+  background: rgba(255, 255, 255, 0.96);
+  overflow: hidden;
+}
+
+.canvas-item.editing:focus {
+  outline: 2px solid var(--accent);
+}
+
+.canvas-item.editing.selected {
+  outline: 2px solid var(--accent);
 }
 
 .resize-handle {
   position: absolute;
-  width: 10px;
-  height: 10px;
-  background: var(--accent);
-  border-radius: 2px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--accent);
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text);
+  border-radius: 8px;
   cursor: nwse-resize;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 3;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
 }
 
 .resize-handle.br {
-  right: -5px;
-  bottom: -5px;
+  right: -12px;
+  bottom: -12px;
 }
 
 .rotate-handle {
@@ -839,26 +958,76 @@ button:disabled {
 
 .delete-btn {
   position: absolute;
-  top: -10px;
-  right: -10px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
+  top: -12px;
+  right: -12px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 8px;
   background: #d64545;
   color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  z-index: 2;
+  padding: 0;
+  z-index: 3;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
 }
 
 .delete-btn:hover {
   background: #ff5a5a;
+}
+
+.edit-btn {
+  position: absolute;
+  top: -12px;
+  left: -12px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  z-index: 3;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.edit-btn:hover {
+  filter: brightness(1.08);
+}
+
+.edit-btn svg,
+.delete-btn svg,
+.resize-handle svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.edit-btn svg,
+.delete-btn svg,
+.resize-handle svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
 }
 
 .guide-line {

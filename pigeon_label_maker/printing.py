@@ -203,7 +203,7 @@ def apply_print_processing(image: Image.Image, settings: AppSettings) -> Image.I
     grayscale = ImageOps.grayscale(image)
     grayscale = ImageEnhance.Contrast(grayscale).enhance(settings.contrast)
 
-    if settings.invert:
+    if not settings.invert:
         grayscale = ImageOps.invert(grayscale)
 
     width_px, height_px = print_pixel_size(settings)
