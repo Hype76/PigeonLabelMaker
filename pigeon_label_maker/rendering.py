@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+from io import BytesIO
 import math
 from pathlib import Path
 
@@ -44,6 +46,15 @@ def resolve_font_path(font_name: str) -> str:
     windows_font = Path("C:/Windows/Fonts") / candidate
     if windows_font.exists():
         return str(windows_font)
+
+    normalized = "".join(ch.lower() for ch in font_name if ch.isalnum())
+    fonts_dir = Path("C:/Windows/Fonts")
+    if normalized and fonts_dir.exists():
+        for extension in ("*.ttf", "*.otf", "*.ttc"):
+            for path in fonts_dir.glob(extension):
+                stem = "".join(ch.lower() for ch in path.stem if ch.isalnum())
+                if normalized == stem or normalized in stem or stem in normalized:
+                    return str(path)
     return candidate
 
 
@@ -86,6 +97,18 @@ def generate_barcode(text: str) -> Image.Image:
 def generate_qr(text: str) -> Image.Image:
     image = qrcode.make(text).convert("RGB")
     return crop_white_space(image)
+
+
+def decode_data_url_image(data_url: str) -> Image.Image | None:
+    if not data_url or not data_url.startswith("data:image/"):
+      return None
+    try:
+        _header, payload = data_url.split(",", 1)
+        raw = base64.b64decode(payload)
+        image = Image.open(BytesIO(raw))
+        return flatten_to_rgb(image)
+    except Exception:
+        return None
 
 
 def measure_text(
@@ -262,11 +285,123 @@ def render_layer(
     base.paste(image, (x_pos, y_pos))
 
 
+def _normalized_to_pixels(value: float | int | None, total: int, default: int = 0) -> int:
+    if value is None:
+        return default
+    numeric = float(value)
+    if 0.0 <= numeric <= 1.5:
+        return int(round(numeric * total))
+    return int(round(numeric))
+
+
+def _canvas_box(item: dict[str, object], width: int, height: int) -> tuple[int, int, int, int]:
+    left = max(0, _normalized_to_pixels(item.get("x"), width))
+    top = max(0, _normalized_to_pixels(item.get("y"), height))
+    box_width = max(1, _normalized_to_pixels(item.get("width"), width, 1))
+    box_height = max(1, _normalized_to_pixels(item.get("height"), height, 1))
+    right = min(width, left + box_width)
+    bottom = min(height, top + box_height)
+    return left, top, max(left + 1, right), max(top + 1, bottom)
+
+
+def _fit_manual_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font_name: str,
+    start_size: int,
+    max_width: int,
+    max_height: int,
+    line_mode: str,
+) -> tuple[ImageFont.ImageFont, list[str], int]:
+    for size in range(max(6, start_size), 5, -1):
+        font = get_font(font_name, size)
+        lines = wrap_text(draw, text, font, max_width, line_mode)
+        if not lines:
+            continue
+        line_height = max(1, int(math.ceil(measure_text(draw, "Ag", font)[1] * 1.1)))
+        total_height = line_height * len(lines)
+        widest = max(measure_text(draw, line, font)[0] for line in lines)
+        if widest <= max_width and total_height <= max_height:
+            return font, lines, line_height
+
+    return fit_text_to_box(draw, text, font_name, max_width, max_height, line_mode)
+
+
+def render_canvas_item(
+    base: Image.Image,
+    settings: AppSettings,
+    item: dict[str, object],
+) -> None:
+    item_type = str(item.get("type", "text")).lower()
+    text = str(item.get("text", "") or "").strip()
+    if item_type != "image" and not text:
+        return
+
+    draw = ImageDraw.Draw(base)
+    left, top, right, bottom = _canvas_box(item, base.width, base.height)
+    box_width = max(1, right - left)
+    box_height = max(1, bottom - top)
+
+    if item_type == "text":
+        font_name = str(item.get("font") or settings.font_name)
+        if item.get("fontScale") is not None:
+            start_size = max(6, _normalized_to_pixels(item.get("fontScale"), base.height, 12))
+            font, lines, line_height = _fit_manual_text(
+                draw=draw,
+                text=text,
+                font_name=font_name,
+                start_size=start_size,
+                max_width=box_width,
+                max_height=box_height,
+                line_mode=settings.line_mode,
+            )
+        else:
+            font, lines, line_height = fit_text_to_box(
+                draw=draw,
+                text=text,
+                font_name=font_name,
+                max_width=box_width,
+                max_height=box_height,
+                line_mode=settings.line_mode,
+            )
+
+        total_height = line_height * len(lines)
+        y_pos = top + max(0, (box_height - total_height) // 2)
+        for line in lines:
+            line_width, _ = measure_text(draw, line, font)
+            x_pos = left + max(0, (box_width - line_width) // 2)
+            draw.text((x_pos, y_pos), line, fill="black", font=font)
+            y_pos += line_height
+        return
+
+    if item_type == "barcode":
+        image = generate_barcode(text)
+    elif item_type == "qr":
+        image = generate_qr(text)
+    elif item_type == "image":
+        image = decode_data_url_image(str(item.get("imageData", "") or ""))
+        if image is None:
+            return
+    else:
+        return
+
+    image.thumbnail((box_width, box_height), RESAMPLE)
+    x_pos = left + max(0, (box_width - image.width) // 2)
+    y_pos = top + max(0, (box_height - image.height) // 2)
+    base.paste(image, (x_pos, y_pos))
+
+
 def render_label(settings: AppSettings, current_image: Image.Image | None) -> Image.Image:
     width, height = label_pixel_size(settings)
     canvas = Image.new("RGB", (width, height), "white")
     if current_image is not None:
         paste_background_image(canvas, current_image)
+
+    if settings.canvas_layout:
+        for item in settings.canvas_layout:
+            if isinstance(item, dict):
+                render_canvas_item(canvas, settings, item)
+        return canvas
 
     boxes = layer_boxes(settings, width, height)
     for index, layer in ((1, settings.layer1), (2, settings.layer2)):

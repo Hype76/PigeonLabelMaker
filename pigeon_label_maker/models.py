@@ -7,7 +7,7 @@ from typing import Any
 LAYER_MODES = ("Text", "Barcode", "QR", "Off")
 ALIGNMENTS = ("Left", "Center", "Right")
 LINE_MODES = ("Auto Wrap", "1 Line", "2 Lines")
-OUTPUT_MODES = ("Printer", "Mock File")
+OUTPUT_MODES = ("Printer", "BLE")
 
 
 @dataclass
@@ -35,13 +35,25 @@ class AppSettings:
     port: str = ""
     copies: int = 1
     density: int = 10
+    brightness: float = 1.0
     contrast: float = 2.0
     threshold: int = 180
-    invert: bool = True
+    image_mode: str = "threshold"
+    invert: bool = False
+    auto_image: bool = True
+    edge_enhance: bool = False
     output_mode: str = "Printer"
+    ble_device_name: str = ""
+    ble_device_address: str = ""
+    ble_write_char_uuid: str = ""
+    ble_pair: bool = False
+    ble_write_with_response: bool = False
+    ble_scan_timeout: float = 5.0
+    ble_chunk_size: int = 180
     last_image_path: str = ""
     export_dir: str = ""
     command_output_dir: str = ""
+    canvas_layout: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -1,0 +1,46 @@
+{
+  "name": "pigeon-label-maker",
+  "version": "0.1.0",
+  "private": true,
+  "author": "Pigeon Label Maker",
+  "description": "Electron shell for the Pigeon Label Maker Python backend",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron ./electron/main.js",
+    "electron": "electron ./electron/main.js",
+    "build:backend": "python -m PyInstaller --clean --noconfirm --onefile --name backend --distpath python-dist --workpath build/pyinstaller --specpath build/pyinstaller backend_entry.py",
+    "build": "npm run build:backend && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.pigeon.labelmaker",
+    "productName": "Pigeon Label Maker",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "pigeon_label_maker/**/*",
+      "main.py",
+      "requirements.txt",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "python-dist",
+        "to": "python"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false,
+      "icon": "electron/icon.ico"
+    }
+  },
+  "dependencies": {
+    "html2canvas": "^1.4.1"
+  }
+}

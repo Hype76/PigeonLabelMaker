@@ -3,3 +3,4 @@ python-barcode>=0.16.1
 qrcode>=8.2
 pyserial>=3.5
 windnd>=1.0.7
+bleak>=0.22.0

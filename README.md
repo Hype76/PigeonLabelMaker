@@ -1,34 +1,79 @@
 # Pigeon Label Maker
 
-Pigeon Label Maker is a Windows desktop tool for building thermal labels with text, barcodes, QR codes, and optional artwork. It uses Tkinter for the interface and generates TSPL printer commands for compatible serial thermal printers.
+Pigeon Label Maker is a Windows label design and thermal printing app for small TSPL-compatible label printers. The main desktop experience is now an Electron shell backed by a Python rendering and print engine. A Tkinter frontend still exists as a fallback, but the Electron app is the primary UI.
 
-## What Changed
+## Current App Overview
 
-This project has been refactored from a single-file prototype into a small application package with:
+- Canvas-based label designer with draggable, resizable, and rotatable elements
+- Text, QR, barcode, and image elements
+- Theme toggle and simple or advanced UI mode
+- COM and BLE printer support
+- Live processed print preview generated from the design canvas
+- Custom label sizes plus quick size presets
+- Test print action
+- Local recent label history
+- Save and load design layout in the Electron UI
+- Windows installer build via Electron Builder and PyInstaller
 
-- Modular rendering, printing, settings, and preset logic
-- Safer input validation and user-facing error messages
-- Persistent settings and user presets
-- Real print preview with orientation, contrast, invert, and threshold processing
-- PNG export and mock print command output
-- Logging for runtime errors and print activity
-- Dynamic serial port refresh
-- Drag and drop image loading on Windows
-- Unit tests for rendering and printer command generation
+## Main Features
+
+### Designer
+
+- Add text, QR, barcode, and image elements
+- Drag, resize, rotate, align, and delete selected items
+- Canvas safe area, center guides, and sticky edge bounds
+- Font picker, manual font size, and optional system font discovery
+- Template shortcuts for `Text`, `Dual`, `QR`, and `Barcode`
+
+### Print Pipeline
+
+- The Electron app captures the design canvas and sends that image to the Python backend
+- Preview and print use the same captured canvas image path
+- Thermal image processing supports:
+  - threshold mode for clean logo-style output
+  - dither mode for photo-like output
+  - brightness, contrast, threshold, invert, auto optimize, and edge enhance controls
+
+### Connections
+
+- Serial COM printing
+- BLE scan, connect, disconnect, inspect, battery query, and print
+- Persistent connection handling so normal print jobs do not intentionally tear down the printer session
+- COM speed is fixed to `115200` in the Electron UI
+
+### UX
+
+- One-time onboarding overlay
+- Help overlay
+- Inline error bar instead of modal popups
+- Print progress for multi-copy jobs
+- Print success pulse
+- Connection type, status, and timer in the action bar
 
 ## Project Structure
 
 ```text
 PigeonLabelMaker/
+|-- backend_entry.py
+|-- build.ps1
 |-- main.py
+|-- package.json
+|-- package-lock.json
 |-- README.md
 |-- requirements.txt
 |-- requirements-dev.txt
-|-- .gitignore
-|-- build.ps1
+|-- electron/
+|   |-- icon.ico
+|   |-- icon.png
+|   |-- index.html
+|   |-- main.js
+|   |-- preload.js
+|   |-- renderer.js
+|   |-- styles.css
 |-- pigeon_label_maker/
 |   |-- __init__.py
 |   |-- app.py
+|   |-- backend_service.py
 |   |-- config.py
 |   |-- models.py
 |   |-- presets.py
@@ -39,50 +84,91 @@ PigeonLabelMaker/
 |   |-- test_rendering.py
 ```
 
+## Requirements
+
+- Windows
+- Python 3.11 or newer recommended
+- Node.js and npm
+- A TSPL-compatible printer over COM or BLE
+
 ## Install
 
 ```powershell
 python -m pip install -r requirements.txt
+npm install
 ```
 
 ## Run
+
+### Electron
+
+```powershell
+npm start
+```
+
+Electron starts the Python backend automatically. In development it runs:
+
+```powershell
+python -m pigeon_label_maker.backend_service
+```
+
+### Tkinter Fallback
 
 ```powershell
 python main.py
 ```
 
-## Usage
+## How to Use
 
-1. Pick a preset or start from scratch.
-2. Set the content and type for Layer 1 and Layer 2.
-3. Load or paste an image if you want artwork behind the text or codes.
-4. Choose the printer profile, label size, DPI, density, and threshold.
-5. Review both previews:
-   - Design Preview shows the full label layout.
-   - Print Preview shows the processed black and white output that will be sent to the printer.
-6. Choose `Printer` to print directly or `Mock File` to save the raw printer command to disk.
-7. Use `Export PNG` if you want a normal image copy of the label.
+1. Launch the Electron app with `npm start`.
+2. Choose a label size preset or apply a custom size.
+3. Add text, QR, barcode, or image elements from the Designer panel.
+4. Move and resize elements on the canvas.
+5. Adjust image processing settings if you are printing artwork or photos.
+6. Select a COM port or scan and connect over BLE.
+7. Use `Test Print` if you want to confirm the connection first.
+8. Click `Print Label`.
 
 ## Keyboard Shortcuts
 
-- `Ctrl+P`: print or save command
-- `Ctrl+S`: export PNG
-- `Ctrl+O`: load image
-- `Ctrl+Shift+V`: paste image from clipboard
-- `F5`: refresh preview
-- `Ctrl+1`: uppercase Layer 1
-- `Ctrl+2`: uppercase Layer 2
-- `Ctrl+Shift+1`: title case Layer 1
-- `Ctrl+Shift+2`: title case Layer 2
-- `Delete`: clear image
+- `Ctrl+Enter`: Print label
+- `Ctrl+L`: Focus selected content input
+- `Ctrl+Backspace`: Clear selected text item text
+- `Ctrl+T`: Toggle theme
+- `Ctrl+M`: Toggle simple or advanced mode
+- `Delete`: Delete selected canvas item
 
-## Settings and Presets
+## Connection Notes
 
-The app stores settings and user presets in your local app data folder:
+### COM
+
+- COM ports are not auto-selected on startup
+- Pick the port you want from the Connection panel
+- The Electron UI keeps the COM speed fixed to `115200`
+
+### BLE
+
+- Scan for nearby devices
+- Select a device
+- Click `Connect`
+- The app automatically chooses a writable printer characteristic
+- Use `Disconnect` to intentionally end the BLE session
+
+## Settings and Local Data
+
+The Python backend stores app files under:
 
 - Settings: `%LOCALAPPDATA%\\PigeonLabelMaker\\settings.json`
-- Presets: `%LOCALAPPDATA%\\PigeonLabelMaker\\user_presets.json`
 - Logs: `%LOCALAPPDATA%\\PigeonLabelMaker\\logs\\app.log`
+- Tkinter user presets: `%LOCALAPPDATA%\\PigeonLabelMaker\\user_presets.json`
+
+The Electron UI also stores some local browser-style state such as:
+
+- theme
+- simple or advanced mode
+- onboarding completion
+- recent labels
+- saved canvas design
 
 ## Testing
 
@@ -90,25 +176,52 @@ The app stores settings and user presets in your local app data folder:
 python -m unittest discover -s tests -v
 ```
 
-## Build a Windows Executable
+## Build a Windows Installer
+
+Install the Python and Node dependencies first, then run:
 
 ```powershell
-python -m pip install -r requirements.txt -r requirements-dev.txt
-.\build.ps1
+npm run build
 ```
 
-The packaged executable will be placed in the `dist` folder.
+That build does two things:
 
-## Printer Notes
+1. freezes the Python backend with PyInstaller using `backend_entry.py`
+2. packages the Electron app with Electron Builder
 
-- The app generates TSPL `BITMAP` commands.
-- Serial settings default to `115200`.
-- Use `Refresh Ports` if your printer was plugged in after the app started.
-- If your printer output looks too dark or too light, adjust `Density`, `Contrast`, and `Threshold`.
+Expected outputs:
+
+- frozen backend in `python-dist/`
+- Windows installer in `dist/`
 
 ## Troubleshooting
 
-- If preview generation fails, check the log file in `%LOCALAPPDATA%\\PigeonLabelMaker\\logs\\app.log`.
-- If printing fails, confirm the selected COM port and that the printer accepts TSPL over serial.
-- If drag and drop does not work, reinstall the requirements so the `windnd` package is present.
-- If fonts look different on another machine, install the referenced Windows fonts or choose another available font.
+### Preview is black or wrong
+
+- make sure the design canvas is visible and not covered by another window layer
+- check `%LOCALAPPDATA%\\PigeonLabelMaker\\logs\\app.log`
+- if you changed image processing recently, try switching between `Clean (Logo)` and `Photo (Dither)`
+
+### Printer does not print
+
+- confirm the correct COM port or BLE device is selected
+- use `Test Print` first
+- verify the printer accepts TSPL commands
+
+### Fonts in print output look wrong
+
+- the Electron app captures the canvas as an image before preview and print
+- fonts that are not fully available to Chromium on the machine can still render differently
+- prefer common installed Windows fonts if exact matching matters
+
+### BLE issues
+
+- rescan if the device list is stale
+- reconnect manually if the printer was powered off and back on
+- some printers expose several writable characteristics, but the app will prefer the known printer one automatically
+
+## Development Notes
+
+- The Electron UI is intentionally thin and talks to the Python backend over stdio
+- Rendering, printer command generation, serial I/O, and BLE logic stay in Python
+- The current print path is image-first, meaning the frontend canvas is the source of truth for preview and print

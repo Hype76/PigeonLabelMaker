@@ -1,0 +1,174 @@
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { spawn } = require("child_process");
+const path = require("path");
+const readline = require("readline");
+
+const APP_NAME = "Pigeon Label Maker";
+
+class BackendClient {
+  constructor() {
+    this.process = null;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.stopping = false;
+  }
+
+  start() {
+    if (this.process) {
+      return;
+    }
+    this.stopping = false;
+
+    const cwd = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, "..");
+    const backendPath = app.isPackaged
+      ? path.join(process.resourcesPath, "python", "backend.exe")
+      : "python";
+    const backendArgs = app.isPackaged
+      ? []
+      : ["-m", "pigeon_label_maker.backend_service"];
+
+    this.process = spawn(backendPath, backendArgs, {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    const output = readline.createInterface({ input: this.process.stdout });
+    output.on("line", (line) => {
+      let message;
+      try {
+        message = JSON.parse(line);
+      } catch (error) {
+        console.error("Backend JSON parse error", error, line);
+        return;
+      }
+      const pending = this.pending.get(message.id);
+      if (!pending) {
+        return;
+      }
+      this.pending.delete(message.id);
+      if (message.ok) {
+        pending.resolve(message.result);
+      } else {
+        const error = new Error(message.error || "Backend request failed");
+        error.traceback = message.traceback || "";
+        pending.reject(error);
+      }
+    });
+
+    this.process.stderr.on("data", (chunk) => {
+      const text = chunk.toString().trim();
+      if (text) {
+        console.error("[backend]", text);
+      }
+    });
+
+    this.process.on("exit", (code, signal) => {
+      console.error(`Backend exited: code=${code}, signal=${signal}`);
+
+      for (const pending of this.pending.values()) {
+        pending.reject(new Error("Backend crashed"));
+      }
+
+      this.pending.clear();
+      this.process = null;
+
+      if (!this.stopping) {
+        setTimeout(() => {
+          console.log("Restarting backend...");
+          this.start();
+        }, 1000);
+      }
+    });
+  }
+
+  request(command, params = {}) {
+    if (!this.process) {
+      this.start();
+    }
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      this.pending.set(id, { resolve, reject });
+      this.process.stdin.write(JSON.stringify({ id, command, params }) + "\n");
+    });
+  }
+
+  stop() {
+    if (!this.process) {
+      return;
+    }
+    this.stopping = true;
+    this.process.kill();
+    this.process = null;
+  }
+}
+
+const backend = new BackendClient();
+
+function createWindow() {
+  const window = new BrowserWindow({
+    width: 1500,
+    height: 960,
+    minWidth: 1180,
+    minHeight: 760,
+    icon: path.join(__dirname, "icon.png"),
+    backgroundColor: "#d9d0c2",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  window.removeMenu();
+  window.setTitle(APP_NAME);
+  window.loadFile(path.join(__dirname, "index.html"));
+}
+
+ipcMain.handle("backend:request", async (_event, command, params) => {
+  return backend.request(command, params);
+});
+
+ipcMain.handle("dialog:open-image", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Choose Image",
+    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "gif", "tif", "tiff"] }],
+    properties: ["openFile"],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
+ipcMain.handle("dialog:save-png", async () => {
+  const result = await dialog.showSaveDialog({
+    title: "Export PNG",
+    defaultPath: "label.png",
+    filters: [{ name: "PNG Image", extensions: ["png"] }],
+  });
+  return result.canceled ? null : result.filePath;
+});
+
+app.setName(APP_NAME);
+
+app.whenReady().then(() => {
+  createWindow();
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on("window-all-closed", () => {
+  backend.stop();
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+app.on("before-quit", () => {
+  backend.stop();
+});

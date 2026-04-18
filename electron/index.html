@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pigeon Label Maker</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand-card">
+          <div class="theme-toggle">
+            <button id="themeToggle" class="ghost small">Toggle Theme</button>
+          </div>
+          <div class="mode-toggle">
+            <button id="modeToggle" class="ghost small">Advanced</button>
+          </div>
+          <div class="mode-toggle">
+            <button id="helpButton" class="ghost small">Help</button>
+          </div>
+          <p class="eyebrow">Electron Studio</p>
+          <h1>Pigeon Label Maker</h1>
+          <p class="subtitle">Fast, simple label printing</p>
+          <div class="brand-strip"></div>
+          <div class="status-row">
+            <span id="appStatus" class="status-pill">Starting</span>
+            <span id="bleStatus" class="status-pill muted">BLE disconnected</span>
+          </div>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Template</h2>
+          </div>
+
+          <div class="template-grid">
+            <button data-template="text" type="button">Text</button>
+            <button data-template="dual" type="button">Dual</button>
+            <button data-template="qr" type="button">QR</button>
+            <button data-template="barcode" type="button">Barcode</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Designer</h2>
+          </div>
+          <div class="tool-grid">
+            <button id="addTextButton" class="ghost" type="button">Add Text</button>
+            <button id="addQrButton" class="ghost" type="button">Add QR</button>
+            <button id="addBarcodeButton" class="ghost" type="button">Add Barcode</button>
+            <button id="addImageButton" class="ghost" type="button">Add Image</button>
+          </div>
+          <div class="align-controls top-gap">
+            <button data-align="left" class="ghost" type="button">L</button>
+            <button data-align="center" class="ghost" type="button">C</button>
+            <button data-align="right" class="ghost" type="button">R</button>
+            <button data-align="top" class="ghost" type="button">T</button>
+            <button data-align="middle" class="ghost" type="button">M</button>
+            <button data-align="bottom" class="ghost" type="button">B</button>
+          </div>
+          <input id="imageUpload" type="file" accept="image/*" class="hidden" />
+          <div class="grid two top-gap">
+            <button id="saveDesignButton" class="ghost" type="button">Save Design</button>
+            <button id="loadDesignButton" class="ghost" type="button">Load Design</button>
+          </div>
+          <label class="field">
+            <span>Selected Content</span>
+            <input id="layer1Text" type="text" placeholder="Edit selected item" />
+          </label>
+            <div class="grid two">
+              <div class="advanced">
+                <label class="field">
+                  <span>Type</span>
+                  <select id="layer1Mode"></select>
+              </label>
+            </div>
+            <label class="field">
+                <span>Align</span>
+                <select id="layer1Align"></select>
+              </label>
+            </div>
+            <label class="field top-gap">
+              <span>Invert Output</span>
+              <label class="toggle" for="invertToggle">
+                <input id="invertToggle" type="checkbox" />
+                <span>Enable</span>
+              </label>
+            </label>
+            <label class="field top-gap">
+              <span>Image Mode</span>
+              <select id="imageMode">
+                <option value="threshold">Clean (Logo)</option>
+                <option value="dither">Photo (Dither)</option>
+              </select>
+            </label>
+            <label class="field top-gap">
+              <label class="toggle" for="autoImage">
+                <input id="autoImage" type="checkbox" checked />
+                <span>Auto Optimize</span>
+              </label>
+            </label>
+            <label class="field top-gap">
+              <label class="toggle" for="edgeEnhance">
+                <input id="edgeEnhance" type="checkbox" />
+                <span>Enhance Edges (Logos)</span>
+              </label>
+            </label>
+            <label class="field top-gap">
+              <span>Brightness</span>
+              <input id="brightness" type="range" min="0.5" max="2" step="0.1" value="1" />
+            </label>
+            <label class="field top-gap">
+              <span>Contrast</span>
+              <input id="contrast" type="range" min="1" max="4" step="0.1" value="2" />
+            </label>
+            <label class="field top-gap">
+              <span>Threshold</span>
+              <input id="threshold" type="range" min="0" max="255" value="180" />
+            </label>
+            <div class="grid two top-gap">
+              <label class="field">
+                <span>Font</span>
+                <select id="fontPicker"></select>
+              </label>
+              <label class="field">
+                <span>Size</span>
+                <input id="fontSizeInput" type="number" min="6" max="200" />
+              </label>
+            </div>
+            <label class="field top-gap">
+              <span>Use System Fonts</span>
+              <label class="toggle" for="systemFontToggle">
+                <input id="systemFontToggle" type="checkbox" />
+                <span>Enable</span>
+              </label>
+            </label>
+            <label class="field top-gap">
+              <span>Copies</span>
+              <div class="copies-control">
+                <button id="copiesMinus" class="ghost small" type="button">-</button>
+                <input id="copies" type="number" min="1" value="1" />
+              <button id="copiesPlus" class="ghost small" type="button">+</button>
+            </div>
+          </label>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Recent</h2>
+          </div>
+
+          <div id="recentLabels" class="recent-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Size</h2>
+          </div>
+
+          <div class="size-grid">
+            <button data-size="40x14" type="button">40x14</button>
+            <button data-size="50x20" type="button">50x20</button>
+            <button data-size="30x30" type="button">30x30</button>
+          </div>
+          <div class="grid two top-gap">
+            <input id="customWidth" type="number" placeholder="Width mm" />
+            <input id="customHeight" type="number" placeholder="Height mm" />
+          </div>
+          <button id="applyCustomSize" class="ghost top-gap" type="button">Apply</button>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Connection</h2>
+          </div>
+          <div class="grid two connection-block">
+            <label class="field">
+              <span>COM Port</span>
+              <select id="portSelect"></select>
+            </label>
+          </div>
+          <div class="advanced">
+            <button id="refreshPortsButton" class="ghost top-gap">Refresh Ports</button>
+          </div>
+          <div class="panel-head top-gap">
+            <h2>BLE</h2>
+          </div>
+          <div class="grid two connection-block">
+            <button id="scanBleButton" class="ghost">Scan</button>
+            <button id="connectBleButton" class="ghost">Connect</button>
+            <button id="disconnectBleButton" class="ghost ble-disconnect">Disconnect</button>
+          </div>
+          <label class="field top-gap">
+            <span>Device</span>
+            <select id="bleDeviceSelect"></select>
+          </label>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <section class="action-bar">
+          <div class="connection-info">
+            <span id="connectionType">COM</span>
+            <span id="connectionStatus" class="status-indicator">Disconnected</span>
+            <span id="connectionTimer" class="connection-timer hidden">00:00</span>
+            <div id="printProgress" class="print-progress hidden"></div>
+          </div>
+
+          <div class="action-buttons">
+            <button id="testPrintButton" class="ghost">
+              Test Print
+            </button>
+
+            <button id="printButton" class="primary large">
+              Print Label (Ctrl+Enter)
+            </button>
+          </div>
+        </section>
+
+        <div id="errorBar" class="error-bar hidden"></div>
+
+        <section class="preview-grid hero-preview">
+          <article class="preview-card">
+            <h3>Design</h3>
+              <div class="preview-frame large">
+                <div id="designCanvas" class="design-canvas">
+                  <div id="canvasSafe" class="canvas-safe"></div>
+                  <div id="vGuide" class="guide-line vertical hidden"></div>
+                  <div id="hGuide" class="guide-line horizontal hidden"></div>
+                </div>
+              </div>
+          </article>
+
+          <article class="preview-card">
+            <h3>Print Output</h3>
+            <div class="preview-frame large print">
+              <img id="printPreview" alt="Print preview" />
+            </div>
+          </article>
+        </section>
+
+        <section class="log-card">
+          <div class="preview-head">
+            <h3>Print History</h3>
+          </div>
+          <div id="printHistory" class="history-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="onboardingOverlay" class="onboarding hidden">
+      <div class="onboarding-card">
+        <h2>Welcome</h2>
+        <p>Quick start:</p>
+        <ul>
+          <li>Type your label text</li>
+          <li>Select COM or BLE connection</li>
+          <li>Click Print</li>
+        </ul>
+        <button id="closeOnboarding" class="primary">Got it</button>
+      </div>
+    </div>
+
+    <div id="helpOverlay" class="help-overlay hidden">
+      <div class="help-card">
+        <h2>How to Use</h2>
+
+        <ul>
+          <li>Type your label text</li>
+          <li>Select COM or BLE</li>
+          <li>Connect if using BLE</li>
+          <li>Click Print</li>
+        </ul>
+
+        <h3>Tips</h3>
+        <ul>
+          <li>Use Test Print to check connection</li>
+          <li>Use Recent labels to reuse text</li>
+          <li>Preview shows exact output</li>
+        </ul>
+
+        <button id="closeHelp" class="primary">Close</button>
+      </div>
+    </div>
+
+    <script src="../node_modules/html2canvas/dist/html2canvas.min.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
