@@ -42,6 +42,7 @@
   },
   "dependencies": {
     "html2canvas": "^1.4.1",
+    "jsbarcode": "^3.12.3",
     "qrcode": "^1.5.4"
   }
 }

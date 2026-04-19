@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 const QRCode = require("qrcode");
 const SvgRenderer = require("qrcode/lib/renderer/svg-tag");
+const JsBarcode = require("jsbarcode");
 
 function renderQrSvg(text = "QR") {
   const content = String(text || "QR");
@@ -21,6 +22,23 @@ function renderQrSvg(text = "QR") {
   );
 }
 
+function renderBarcodeSvg(text = "123456789") {
+  const content = String(text || "123456789");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  JsBarcode(svg, content, {
+    format: "CODE128",
+    displayValue: false,
+    margin: 0,
+    background: "#ffffff",
+    lineColor: "#111111",
+    width: 2,
+    height: 64,
+  });
+  svg.setAttribute("shape-rendering", "crispEdges");
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  return svg.outerHTML;
+}
+
 contextBridge.exposeInMainWorld("pigeonApi", {
   request(command, params = {}) {
     return ipcRenderer.invoke("backend:request", command, params);
@@ -33,5 +51,8 @@ contextBridge.exposeInMainWorld("pigeonApi", {
   },
   renderQrSvg(text) {
     return renderQrSvg(text);
+  },
+  renderBarcodeSvg(text) {
+    return renderBarcodeSvg(text);
   },
 });

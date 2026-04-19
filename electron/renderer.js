@@ -10,10 +10,18 @@ const state = {
   bleWritable: [],
   bleNotify: [],
   bleState: { connected: false, address: "", name: "" },
+  batteryLevel: null,
+  comConnected: false,
+  comConnecting: false,
   isHydrating: false,
   previewTimer: null,
   saveTimer: null,
   busy: false,
+  printQueueActive: false,
+  printStopRequested: false,
+  historyPast: [],
+  historyFuture: [],
+  connectionTestStatus: "idle",
   connecting: false,
   connectionStartTime: null,
   connectionTimerInterval: null,
@@ -26,6 +34,7 @@ const state = {
   editingItemIndex: null,
   lastCanvasClickIndex: null,
   lastCanvasClickAt: 0,
+  savedDesigns: [],
 };
 
 const elements = {};
@@ -162,8 +171,54 @@ async function loadFonts() {
   syncSelectedItemControls();
 }
 
+function humanizeErrorMessage(message) {
+  const text = String(message || "").trim();
+  const lower = text.toLowerCase();
+
+  if (!text) {
+    return "Something went wrong. Try again.";
+  }
+
+  if (lower.includes("could not open port")) {
+    const match = text.match(/port '([^']+)'/i);
+    const port = match?.[1] || state.settings?.port || "the selected port";
+    return `${port} could not be opened. Check that the printer is connected and that the port still exists.`;
+  }
+
+  if (lower.includes("device which does not exist")) {
+    return "The selected printer is no longer available. Refresh the ports list and choose the correct device again.";
+  }
+
+  if (lower.includes("select a com port first")) {
+    return "Choose a COM port, then click Connect COM.";
+  }
+
+  if (lower.includes("connect com port first")) {
+    return "Click Connect COM before printing.";
+  }
+
+  if (lower.includes("select a ble device first")) {
+    return "Choose a BLE printer, then click Connect.";
+  }
+
+  if (lower.includes("connect to ble device first")) {
+    return "Connect to the BLE printer before printing.";
+  }
+
+  if (lower.includes("backend crashed") || lower.includes("backend exited")) {
+    return "The print service restarted. Try the action again.";
+  }
+
+  if (lower.startsWith("error invoking remote method")) {
+    const cleaned = text.replace(/^Error invoking remote method '[^']+':\s*/i, "");
+    return humanizeErrorMessage(cleaned);
+  }
+
+  return text;
+}
+
 function showError(message) {
-  elements.errorBar.textContent = message;
+  elements.errorBar.textContent = humanizeErrorMessage(message);
   elements.errorBar.classList.remove("hidden");
 }
 
@@ -187,6 +242,9 @@ function validateBeforePrint() {
   if (state.settings.output_mode === "Printer") {
     if (!state.settings.port) {
       return "Select a COM port";
+    }
+    if (!state.comConnected) {
+      return "Connect COM port first";
     }
   }
 
@@ -244,9 +302,48 @@ function setupShortcuts() {
       toggleMode();
     }
 
+    if (e.ctrlKey && e.key.toLowerCase() === "z" && !e.shiftKey) {
+      e.preventDefault();
+      undoCanvas();
+    }
+
+    if ((e.ctrlKey && e.key.toLowerCase() === "y") || (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "z")) {
+      e.preventDefault();
+      redoCanvas();
+    }
+
+    if (e.ctrlKey && e.key.toLowerCase() === "d" && !isTypingTarget) {
+      e.preventDefault();
+      duplicateSelectedItem();
+    }
+
     if (!isTypingTarget && e.key === "Delete" && state.selectedItem !== null) {
       e.preventDefault();
       deleteItem(state.selectedItem);
+    }
+
+    if (!isTypingTarget && state.selectedItem !== null && e.key.startsWith("Arrow")) {
+      e.preventDefault();
+      const item = state.canvasItems[state.selectedItem];
+      if (!item || item.locked) {
+        return;
+      }
+      const step = e.shiftKey ? 10 : 1;
+      if (e.key === "ArrowLeft") {
+        item.x -= step;
+      } else if (e.key === "ArrowRight") {
+        item.x += step;
+      } else if (e.key === "ArrowUp") {
+        item.y -= step;
+      } else if (e.key === "ArrowDown") {
+        item.y += step;
+      }
+      clampItemToCanvas(item, elements.designCanvas);
+      syncCanvasIntoSettings();
+      renderCanvasFromState();
+      recordCanvasHistory();
+      queueSave();
+      triggerPreviewAfterInteraction();
     }
   });
 }
@@ -273,6 +370,22 @@ function nextCanvasId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function mmToPixels(mm, dpi) {
+  return Math.max(1, Math.round((Number(mm) / 25.4) * Number(dpi)));
+}
+
+function getCanvasLogicalSize() {
+  const dpi = Number(state.settings?.print_dpi) || 203;
+  return {
+    width: mmToPixels(Number(state.settings?.label_width_mm) || 40, dpi),
+    height: mmToPixels(Number(state.settings?.label_height_mm) || 14, dpi),
+  };
+}
+
+function getCanvasPreviewScale() {
+  return Number(elements.designCanvas?.dataset.previewScale) || 1;
+}
+
 function makeCanvasItem(type, overrides = {}) {
   const defaults = {
     id: nextCanvasId(),
@@ -293,10 +406,13 @@ function makeCanvasItem(type, overrides = {}) {
     font: state.settings?.font_name || "Arial Bold",
     fontSize: type === "text" ? 50 : null,
     fittedFontSize: null,
+    fontWeight: type === "text" ? 700 : 400,
+    textTransform: "none",
     rotation: 0,
     invert: false,
     imageData: "",
     aspectRatio: type === "image" ? 1 : null,
+    locked: false,
   };
   const item = { ...defaults, ...overrides };
   if (item.type === "image") {
@@ -305,6 +421,53 @@ function makeCanvasItem(type, overrides = {}) {
     item.aspectRatio = Number(item.aspectRatio) || width / height;
   }
   return item;
+}
+
+function formatExpiryDate(value) {
+  const parts = String(value || "").split("-");
+  if (parts.length !== 3) {
+    return "";
+  }
+
+  const [year, month, day] = parts;
+  if (!year || !month || !day) {
+    return "";
+  }
+
+  return `${day}/${month}/${year}`;
+}
+
+function buildExpiryCanvasItems(dateText) {
+  const canvasWidth = elements.designCanvas?.clientWidth || 600;
+  const canvasHeight = elements.designCanvas?.clientHeight || 210;
+  const sidePadding = Math.max(20, Math.round(canvasWidth * 0.08));
+  const availableWidth = Math.max(120, canvasWidth - (sidePadding * 2));
+  const titleHeight = Math.max(28, Math.round(canvasHeight * 0.2));
+  const dateHeight = Math.max(34, Math.round(canvasHeight * 0.26));
+  const titleY = Math.max(18, Math.round(canvasHeight * 0.18));
+  const gap = Math.max(8, Math.round(canvasHeight * 0.08));
+  const dateY = titleY + titleHeight + gap;
+
+  return [
+    makeCanvasItem("text", {
+      key: "layer1",
+      text: "Expires",
+      x: sidePadding,
+      y: titleY,
+      width: availableWidth,
+      height: titleHeight,
+      fontSize: Math.max(18, Math.round(canvasHeight * 0.16)),
+    }),
+    makeCanvasItem("text", {
+      key: "layer2",
+      text: dateText,
+      x: sidePadding,
+      y: dateY,
+      width: availableWidth,
+      height: dateHeight,
+      fontSize: Math.max(22, Math.round(canvasHeight * 0.22)),
+    }),
+  ];
 }
 
 function renderRecentLabels() {
@@ -370,6 +533,161 @@ function renderPrintHistory() {
   });
 }
 
+function cloneCanvasItems(items = state.canvasItems) {
+  return structuredClone(
+    items.map((item) => ({
+      ...item,
+      _tempX: undefined,
+      _tempY: undefined,
+      _tempWidth: undefined,
+      _tempHeight: undefined,
+    }))
+  );
+}
+
+function snapshotCanvasState() {
+  return JSON.stringify(cloneCanvasItems());
+}
+
+function resetCanvasHistory() {
+  state.historyPast = [snapshotCanvasState()];
+  state.historyFuture = [];
+}
+
+function recordCanvasHistory() {
+  const snapshot = snapshotCanvasState();
+  if (state.historyPast[state.historyPast.length - 1] === snapshot) {
+    return;
+  }
+  state.historyPast.push(snapshot);
+  if (state.historyPast.length > 80) {
+    state.historyPast = state.historyPast.slice(-80);
+  }
+  state.historyFuture = [];
+  updateCanvasActionButtons();
+}
+
+function restoreCanvasSnapshot(snapshot) {
+  state.canvasItems = JSON.parse(snapshot).map((item) =>
+    makeCanvasItem(String(item.type || "text").toLowerCase(), item)
+  );
+  if (state.selectedItem !== null && state.selectedItem >= state.canvasItems.length) {
+    state.selectedItem = state.canvasItems.length ? state.canvasItems.length - 1 : null;
+  }
+  syncCanvasIntoSettings();
+  renderCanvasFromState();
+  recordCanvasHistory();
+  queueSave();
+  queuePreview();
+  updateCanvasActionButtons();
+}
+
+function undoCanvas() {
+  if (state.historyPast.length <= 1) {
+    return;
+  }
+  const current = state.historyPast.pop();
+  state.historyFuture.push(current);
+  restoreCanvasSnapshot(state.historyPast[state.historyPast.length - 1]);
+  setStatus("Undo");
+}
+
+function redoCanvas() {
+  if (state.historyFuture.length === 0) {
+    return;
+  }
+  const snapshot = state.historyFuture.pop();
+  state.historyPast.push(snapshot);
+  restoreCanvasSnapshot(snapshot);
+  setStatus("Redo");
+}
+
+function updateCanvasActionButtons() {
+  const selected = state.selectedItem !== null ? state.canvasItems[state.selectedItem] : null;
+  const isText = selected?.type === "text";
+  if (elements.undoButton) {
+    elements.undoButton.disabled = state.historyPast.length <= 1;
+  }
+  if (elements.redoButton) {
+    elements.redoButton.disabled = state.historyFuture.length === 0;
+  }
+  if (elements.duplicateButton) {
+    elements.duplicateButton.disabled = !selected;
+  }
+  if (elements.lockButton) {
+    elements.lockButton.disabled = !selected;
+    elements.lockButton.textContent = selected?.locked ? "Unlock" : "Lock";
+    elements.lockButton.classList.toggle("is-active", Boolean(selected?.locked));
+  }
+  if (elements.sendBackwardButton) {
+    elements.sendBackwardButton.disabled = !selected || state.selectedItem === 0;
+  }
+  if (elements.bringForwardButton) {
+    elements.bringForwardButton.disabled = !selected || state.selectedItem === state.canvasItems.length - 1;
+  }
+  if (elements.fitTextButton) {
+    elements.fitTextButton.disabled = !isText;
+  }
+  if (elements.toggleBoldButton) {
+    elements.toggleBoldButton.disabled = !isText;
+    elements.toggleBoldButton.classList.toggle("is-active", Boolean(selected && Number(selected.fontWeight) >= 700));
+  }
+  if (elements.toggleUppercaseButton) {
+    elements.toggleUppercaseButton.disabled = !isText;
+    elements.toggleUppercaseButton.classList.toggle("is-active", Boolean(selected && selected.textTransform === "uppercase"));
+  }
+}
+
+function loadSavedDesigns() {
+  try {
+    state.savedDesigns = JSON.parse(localStorage.getItem("saved_designs") || "[]");
+  } catch (_error) {
+    state.savedDesigns = [];
+  }
+}
+
+function renderSavedDesigns() {
+  if (!elements.savedDesigns) {
+    return;
+  }
+  elements.savedDesigns.innerHTML = "";
+  for (const design of state.savedDesigns) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "saved-design-card ghost";
+    button.innerHTML = `
+      <img src="${design.thumbnail}" alt="${design.name}" />
+      <span>${design.name}</span>
+    `;
+    button.addEventListener("click", () => {
+      state.canvasItems = design.items.map((item) =>
+        makeCanvasItem(String(item.type || "text").toLowerCase(), item)
+      );
+      state.selectedItem = state.canvasItems.length ? 0 : null;
+      syncCanvasIntoSettings();
+      renderCanvasFromState();
+      resetCanvasHistory();
+      queueSave();
+      queuePreview();
+      setStatus(`Loaded ${design.name}`);
+    });
+    elements.savedDesigns.appendChild(button);
+  }
+}
+
+function updateConnectionTestBadge(status = state.connectionTestStatus) {
+  state.connectionTestStatus = status;
+  if (!elements.connectionTestBadge) {
+    return;
+  }
+  const label =
+    status === "pass" ? "Connection OK" :
+    status === "fail" ? "Connection Failed" :
+    "Not tested";
+  elements.connectionTestBadge.textContent = label;
+  elements.connectionTestBadge.className = `status-pill${status === "idle" ? " muted" : ""}`;
+}
+
 function showPrintSuccess() {
   elements.printButton.classList.add("print-success");
 
@@ -392,6 +710,23 @@ function normalizeInlineEditorText(value) {
   return String(value || "")
     .replaceAll("\r", "")
     .replaceAll("\n", "");
+}
+
+function insertTextAtSelection(text) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  const node = document.createTextNode(text);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.setEndAfter(node);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
 }
 
 function escapeSvgText(value) {
@@ -443,17 +778,15 @@ function qrSvgDataUri(text) {
 }
 
 function barcodeSvgMarkup(text) {
-  const content = text || "BARCODE";
-  let x = 4;
-  const bars = [];
-  for (const char of content) {
-    const code = char.charCodeAt(0);
-    const barWidth = (code % 3) + 1;
-    const gap = ((code >> 2) % 2) + 1;
-    bars.push(`<rect x="${x}" y="4" width="${barWidth}" height="52" fill="#111111" />`);
-    x += barWidth + gap;
+  const content = String(text || "123456789");
+  try {
+    const svg = window.pigeonApi?.renderBarcodeSvg?.(content);
+    if (svg) {
+      return svg;
+    }
+  } catch (_error) {
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Math.max(80, x + 4)} 68"><rect width="100%" height="100%" fill="#ffffff"/>${bars.join("")}<text x="50%" y="64" text-anchor="middle" font-family="Arial" font-size="8" fill="#111111">${escapeSvgText(content)}</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 68"><rect width="100%" height="100%" fill="#ffffff"/><text x="50%" y="52%" text-anchor="middle" font-family="Arial" font-size="12" fill="#111111">${escapeSvgText(content)}</text></svg>`;
 }
 
 function barcodeSvgDataUri(text) {
@@ -507,6 +840,7 @@ function syncSelectedItemControls() {
   elements.fontSizeInput.disabled = item.type !== "text";
   elements.layer1Mode.value =
     item.type === "text" ? "Text" : item.type === "qr" ? "QR" : item.type === "barcode" ? "Barcode" : "Text";
+  updateCanvasActionButtons();
 }
 
 function commitSelectedFontSize(rawValue, options = {}) {
@@ -562,6 +896,10 @@ function syncCanvasIntoSettings() {
     height: item.height / canvasHeight,
     font: item.font || state.settings.font_name,
     fontScale: item.fontSize ? (item.fontSize / canvasHeight) : null,
+    fontWeight: Number(item.fontWeight) || 400,
+    textTransform: item.textTransform || "none",
+    rotation: Number(item.rotation) || 0,
+    locked: Boolean(item.locked),
     invert: Boolean(item.invert),
     imageData: item.imageData || "",
   }));
@@ -653,14 +991,29 @@ async function captureCanvasImage() {
   }
 
   await ensureCanvasFontsReady();
-  canvasEl.classList.add("capture-render");
-  await new Promise((resolve) => window.requestAnimationFrame(resolve));
-  await new Promise((resolve) => window.requestAnimationFrame(resolve));
+  const captureHost = document.createElement("div");
+  captureHost.style.position = "fixed";
+  captureHost.style.left = "-100000px";
+  captureHost.style.top = "0";
+  captureHost.style.pointerEvents = "none";
+  captureHost.style.opacity = "0";
+  captureHost.style.zIndex = "-1";
+
+  const clone = canvasEl.cloneNode(true);
+  clone.classList.add("capture-render");
+  clone.style.transform = "none";
+  clone.style.transition = "none";
+  clone.dataset.previewScale = "1";
+  captureHost.appendChild(clone);
+  document.body.appendChild(captureHost);
 
   try {
-    const canvas = await window.html2canvas(canvasEl, {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+    const canvas = await window.html2canvas(clone, {
       backgroundColor: "#ffffff",
-      scale: 2,
+      scale: 1,
       useCORS: true,
       ignoreElements: (element) =>
         Boolean(
@@ -676,7 +1029,7 @@ async function captureCanvasImage() {
 
     return canvas.toDataURL("image/png");
   } finally {
-    canvasEl.classList.remove("capture-render");
+    captureHost.remove();
   }
 }
 
@@ -712,6 +1065,10 @@ function buildCanvasItemsFromSettings() {
         height: Number(item.height) <= 1.5 ? Math.round(Number(item.height || 0.2) * canvasHeight) : Number(item.height || 60),
         font: item.font || state.settings.font_name,
         fontSize: item.fontScale ? Math.round(Number(item.fontScale) * canvasHeight) : null,
+        fontWeight: Number(item.fontWeight) || 400,
+        textTransform: item.textTransform || "none",
+        rotation: Number(item.rotation) || 0,
+        locked: Boolean(item.locked),
         invert: Boolean(item.invert),
         imageData: item.imageData || "",
       }
@@ -748,10 +1105,18 @@ function buildCanvasItemsFromSettings() {
 }
 
 function updateCanvasSurface() {
-  const width = Number(state.settings?.label_width_mm) || 40;
-  const height = Number(state.settings?.label_height_mm) || 14;
-  elements.designCanvas.style.setProperty("--label-aspect", `${width} / ${height}`);
-  elements.designCanvas.style.aspectRatio = `${width} / ${height}`;
+  const logical = getCanvasLogicalSize();
+  const viewportWidth = elements.designCanvasViewport?.clientWidth || logical.width;
+  const viewportHeight = elements.designCanvasViewport?.clientHeight || logical.height;
+  const scale = Math.max(
+    0.1,
+    Math.min(viewportWidth / logical.width, viewportHeight / logical.height)
+  );
+
+  elements.designCanvas.style.width = `${logical.width}px`;
+  elements.designCanvas.style.height = `${logical.height}px`;
+  elements.designCanvas.style.transform = `scale(${scale})`;
+  elements.designCanvas.dataset.previewScale = String(scale);
 }
 
 function updatePrintPreviewOrientation() {
@@ -767,9 +1132,8 @@ function getRenderedItemHeight(item, el = null) {
 }
 
 function getCanvasBounds(canvas, item, el = null) {
-  const rect = canvas.getBoundingClientRect();
-  const canvasWidth = rect.width || canvas.clientWidth || 0;
-  const canvasHeight = rect.height || canvas.clientHeight || 0;
+  const canvasWidth = canvas.clientWidth || 0;
+  const canvasHeight = canvas.clientHeight || 0;
   const itemWidth = getRenderedItemWidth(item, el);
   const itemHeight = getRenderedItemHeight(item, el);
   const safeMargin = 10;
@@ -881,11 +1245,14 @@ function renderCanvasFromState() {
     el.style.pointerEvents = "auto";
     el.style.transform = `rotate(${item.rotation || 0}deg)`;
     el.style.transformOrigin = "center center";
+    el.classList.toggle("locked", Boolean(item.locked));
 
     if (item.type === "text") {
       el.innerText = canvasItemText(item);
       el.style.fontFamily = normalizeCanvasFontFamily(item.font || state.settings.font_name);
       el.style.textRendering = "geometricPrecision";
+      el.style.fontWeight = String(Number(item.fontWeight) || 400);
+      el.style.textTransform = item.textTransform || "none";
       const fontSize = Math.max(6, Number(item.fontSize) || 50);
       if (Number.isFinite(fontSize)) {
         el.style.fontSize = `${fontSize}px`;
@@ -1046,12 +1413,29 @@ function deleteItem(index) {
   state.selectedItem = null;
   syncCanvasIntoSettings();
   renderCanvasFromState();
+  recordCanvasHistory();
   queueSave();
   triggerPreviewAfterInteraction();
 }
 
-function saveDesign() {
+async function saveDesign() {
   localStorage.setItem("design", JSON.stringify(state.canvasItems));
+  const thumbnail = await captureCanvasImage();
+  const design = {
+    id: nextCanvasId(),
+    name: `Design ${new Date().toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`,
+    thumbnail,
+    items: cloneCanvasItems(),
+  };
+  state.savedDesigns.unshift(design);
+  state.savedDesigns = state.savedDesigns.slice(0, 12);
+  localStorage.setItem("saved_designs", JSON.stringify(state.savedDesigns));
+  renderSavedDesigns();
 }
 
 function loadDesign() {
@@ -1069,6 +1453,7 @@ function loadDesign() {
     state.selectedItem = 0;
     syncCanvasIntoSettings();
     renderCanvasFromState();
+    resetCanvasHistory();
     return true;
   } catch (_error) {
     return false;
@@ -1081,8 +1466,105 @@ function addItem(type, overrides = {}) {
   state.selectedItem = state.canvasItems.length - 1;
   syncCanvasIntoSettings();
   renderCanvasFromState();
+  recordCanvasHistory();
   queueSave();
   queuePreview();
+}
+
+function duplicateSelectedItem() {
+  if (state.selectedItem === null) {
+    return;
+  }
+  const source = state.canvasItems[state.selectedItem];
+  if (!source) {
+    return;
+  }
+  const duplicate = makeCanvasItem(source.type, {
+    ...structuredClone(source),
+    id: nextCanvasId(),
+    x: Number(source.x) + 12,
+    y: Number(source.y) + 12,
+  });
+  state.canvasItems.splice(state.selectedItem + 1, 0, duplicate);
+  state.selectedItem += 1;
+  syncCanvasIntoSettings();
+  renderCanvasFromState();
+  recordCanvasHistory();
+  queueSave();
+  queuePreview();
+}
+
+function toggleSelectedLock() {
+  if (state.selectedItem === null) {
+    return;
+  }
+  const item = state.canvasItems[state.selectedItem];
+  item.locked = !item.locked;
+  syncCanvasIntoSettings();
+  renderCanvasFromState();
+  recordCanvasHistory();
+  queueSave();
+  triggerPreviewAfterInteraction();
+}
+
+function moveSelectedLayer(direction) {
+  if (state.selectedItem === null) {
+    return;
+  }
+  const from = state.selectedItem;
+  const to = direction === "forward" ? from + 1 : from - 1;
+  if (to < 0 || to >= state.canvasItems.length) {
+    return;
+  }
+  const [item] = state.canvasItems.splice(from, 1);
+  state.canvasItems.splice(to, 0, item);
+  state.selectedItem = to;
+  syncCanvasIntoSettings();
+  renderCanvasFromState();
+  recordCanvasHistory();
+  queueSave();
+  triggerPreviewAfterInteraction();
+}
+
+function fitSelectedTextToBox() {
+  if (state.selectedItem === null) {
+    return;
+  }
+  const item = state.canvasItems[state.selectedItem];
+  if (!item || item.type !== "text") {
+    return;
+  }
+  item.fontSize = null;
+  renderCanvasFromState();
+  const selectedEl = elements.designCanvas.querySelector(".canvas-item.selected");
+  if (selectedEl) {
+    fitTextToBox(selectedEl, item);
+    item.fontSize = Math.max(6, Math.round(item.fittedFontSize || 50));
+  }
+  syncCanvasIntoSettings();
+  renderCanvasFromState();
+  recordCanvasHistory();
+  queueSave();
+  triggerPreviewAfterInteraction();
+}
+
+async function exportCurrentDesignPng() {
+  try {
+    clearError();
+    const outputPath = await window.pigeonApi.choosePngPath();
+    if (!outputPath) {
+      return;
+    }
+    const imageData = await captureCanvasImage();
+    await safeRequest("exportPng", {
+      settings: buildRasterRenderSettings(),
+      imagePath: imageData,
+      outputPath,
+    });
+    setStatus("PNG exported");
+  } catch (error) {
+    showError(error.message);
+  }
 }
 
 function alignSelected(type) {
@@ -1092,9 +1574,8 @@ function alignSelected(type) {
 
   state.isCanvasInteracting = true;
   const item = state.canvasItems[state.selectedItem];
-  const rect = elements.designCanvas.getBoundingClientRect();
-  const canvasWidth = rect.width || elements.designCanvas.clientWidth || 0;
-  const canvasHeight = rect.height || elements.designCanvas.clientHeight || 0;
+  const canvasWidth = elements.designCanvas.clientWidth || 0;
+  const canvasHeight = elements.designCanvas.clientHeight || 0;
 
   if (type === "left") {
     item.x = 0;
@@ -1166,6 +1647,7 @@ function closeInlineEditor(options = {}) {
     item.text = editorValue ?? item.text;
     syncCanvasIntoSettings();
     syncSelectedItemControls();
+    recordCanvasHistory();
     queueSave();
     triggerPreviewAfterInteraction();
   }
@@ -1173,8 +1655,38 @@ function closeInlineEditor(options = {}) {
   renderCanvasFromState();
 }
 
+function insertSymbol(symbol) {
+  const item = state.selectedItem !== null ? state.canvasItems[state.selectedItem] : state.canvasItems[0];
+  if (!item || item.type === "image") {
+    return;
+  }
+
+  if (state.editingItemIndex !== null && state.inlineEditor) {
+    state.inlineEditor.focus();
+    if (!insertTextAtSelection(symbol)) {
+      state.inlineEditor.innerText = `${state.inlineEditor.innerText || ""}${symbol}`;
+    }
+    state.inlineEditor.dispatchEvent(new Event("input", { bubbles: true }));
+    return;
+  }
+
+  const input = elements.layer1Text;
+  input.focus();
+  const start = Number.isFinite(input.selectionStart) ? input.selectionStart : input.value.length;
+  const end = Number.isFinite(input.selectionEnd) ? input.selectionEnd : input.value.length;
+  input.setRangeText(symbol, start, end, "end");
+  readFormIntoState();
+  renderCanvasFromState();
+  recordCanvasHistory();
+  queueSave();
+  queuePreview();
+}
+
 function makeDraggable(el, item, index) {
   el.addEventListener("mousedown", (e) => {
+    if (item.locked) {
+      return;
+    }
     if (
       e.target.closest(".resize-handle") ||
       e.target.closest(".rotate-handle") ||
@@ -1197,15 +1709,22 @@ function makeDraggable(el, item, index) {
       item,
       index,
       el,
-      offsetX: e.offsetX,
-      offsetY: e.offsetY,
+      offsetX: 0,
+      offsetY: 0,
     };
+    const scale = getCanvasPreviewScale();
+    const itemRect = el.getBoundingClientRect();
+    state.dragContext.offsetX = (e.clientX - itemRect.left) / scale;
+    state.dragContext.offsetY = (e.clientY - itemRect.top) / scale;
     syncSelectedItemControls();
   });
 }
 
 function makeResizable(el, item, handle, index) {
   handle.addEventListener("mousedown", (e) => {
+    if (item.locked) {
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     state.isCanvasInteracting = true;
@@ -1222,6 +1741,9 @@ function makeResizable(el, item, handle, index) {
 
 function makeRotatable(el, item, handle, index) {
   handle.addEventListener("mousedown", (e) => {
+    if (item.locked) {
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     state.isCanvasInteracting = true;
@@ -1236,27 +1758,90 @@ function makeRotatable(el, item, handle, index) {
   });
 }
 
-function applySnapping(item, canvasRect, el) {
-  const centerX = canvasRect.width / 2;
-  const centerY = canvasRect.height / 2;
+function applySnapping(item, canvas, el) {
+  const canvasWidth = canvas.clientWidth || 0;
+  const canvasHeight = canvas.clientHeight || 0;
+  const width = el.offsetWidth;
+  const height = el.offsetHeight;
+  const snapThreshold = 8;
 
-  const elWidth = el.offsetWidth;
-  const elHeight = el.offsetHeight;
+  const current = {
+    left: item.x,
+    centerX: item.x + (width / 2),
+    right: item.x + width,
+    top: item.y,
+    middleY: item.y + (height / 2),
+    bottom: item.y + height,
+  };
 
-  const itemCenterX = item.x + elWidth / 2;
-  const itemCenterY = item.y + elHeight / 2;
+  const verticalCandidates = [{ position: canvasWidth / 2, anchor: "centerX" }];
+  const horizontalCandidates = [{ position: canvasHeight / 2, anchor: "middleY" }];
 
-  const snapThreshold = 10;
+  for (const other of state.canvasItems) {
+    if (other === item) {
+      continue;
+    }
+    verticalCandidates.push(
+      { position: other.x, anchor: "left" },
+      { position: other.x + (other.width / 2), anchor: "centerX" },
+      { position: other.x + other.width, anchor: "right" }
+    );
+    horizontalCandidates.push(
+      { position: other.y, anchor: "top" },
+      { position: other.y + (other.height / 2), anchor: "middleY" },
+      { position: other.y + other.height, anchor: "bottom" }
+    );
+  }
 
-  if (Math.abs(itemCenterX - centerX) < snapThreshold) {
-    item.x = centerX - elWidth / 2;
+  let bestVertical = null;
+  for (const candidate of verticalCandidates) {
+    for (const anchor of ["left", "centerX", "right"]) {
+      const distance = Math.abs(current[anchor] - candidate.position);
+      if (distance > snapThreshold) {
+        continue;
+      }
+      if (!bestVertical || distance < bestVertical.distance) {
+        bestVertical = { ...candidate, anchor, distance };
+      }
+    }
+  }
+
+  let bestHorizontal = null;
+  for (const candidate of horizontalCandidates) {
+    for (const anchor of ["top", "middleY", "bottom"]) {
+      const distance = Math.abs(current[anchor] - candidate.position);
+      if (distance > snapThreshold) {
+        continue;
+      }
+      if (!bestHorizontal || distance < bestHorizontal.distance) {
+        bestHorizontal = { ...candidate, anchor, distance };
+      }
+    }
+  }
+
+  if (bestVertical) {
+    if (bestVertical.anchor === "left") {
+      item.x = bestVertical.position;
+    } else if (bestVertical.anchor === "centerX") {
+      item.x = bestVertical.position - (width / 2);
+    } else {
+      item.x = bestVertical.position - width;
+    }
+    elements.vGuide.style.left = `${bestVertical.position}px`;
     elements.vGuide.classList.remove("hidden");
   } else {
     elements.vGuide.classList.add("hidden");
   }
 
-  if (Math.abs(itemCenterY - centerY) < snapThreshold) {
-    item.y = centerY - elHeight / 2;
+  if (bestHorizontal) {
+    if (bestHorizontal.anchor === "top") {
+      item.y = bestHorizontal.position;
+    } else if (bestHorizontal.anchor === "middleY") {
+      item.y = bestHorizontal.position - (height / 2);
+    } else {
+      item.y = bestHorizontal.position - height;
+    }
+    elements.hGuide.style.top = `${bestHorizontal.position}px`;
     elements.hGuide.classList.remove("hidden");
   } else {
     elements.hGuide.classList.add("hidden");
@@ -1277,9 +1862,10 @@ function attachCanvasInteractions() {
     }
 
     const rect = elements.designCanvas.getBoundingClientRect();
+    const scale = getCanvasPreviewScale();
     if (state.dragContext.mode === "resize") {
-      let nextWidth = Math.max(40, e.clientX - rect.left - state.dragContext.item.x);
-      let nextHeight = Math.max(20, e.clientY - rect.top - state.dragContext.item.y);
+      let nextWidth = Math.max(40, ((e.clientX - rect.left) / scale) - state.dragContext.item.x);
+      let nextHeight = Math.max(20, ((e.clientY - rect.top) / scale) - state.dragContext.item.y);
       const canvas = state.dragContext.el.parentElement;
       if (state.dragContext.item.type === "image") {
         const ratio =
@@ -1316,13 +1902,13 @@ function attachCanvasInteractions() {
       state.dragContext.item.rotation = angle;
       state.dragContext.el.style.transform = `rotate(${angle}deg)`;
     } else {
-      const nextX = e.clientX - rect.left - state.dragContext.offsetX;
-      const nextY = e.clientY - rect.top - state.dragContext.offsetY;
+      const nextX = ((e.clientX - rect.left) / scale) - state.dragContext.offsetX;
+      const nextY = ((e.clientY - rect.top) / scale) - state.dragContext.offsetY;
 
       state.dragContext.item.x = nextX;
       state.dragContext.item.y = nextY;
       applyStickyBounds(state.dragContext.item, elements.designCanvas, state.dragContext.el);
-      applySnapping(state.dragContext.item, rect, state.dragContext.el);
+      applySnapping(state.dragContext.item, elements.designCanvas, state.dragContext.el);
       state.dragContext.item._tempX = state.dragContext.item.x;
       state.dragContext.item._tempY = state.dragContext.item.y;
       state.dragContext.el.style.left = `${state.dragContext.item._tempX}px`;
@@ -1352,6 +1938,7 @@ function attachCanvasInteractions() {
       }
       syncCanvasIntoSettings();
       renderCanvasFromState();
+      recordCanvasHistory();
       queueSave();
       triggerPreviewAfterInteraction();
     }
@@ -1366,11 +1953,11 @@ function attachCanvasInteractions() {
 function startPrintProgress(total) {
   elements.printProgress.classList.remove("hidden");
   elements.printProgress.classList.add("active");
-  elements.printProgress.textContent = `Printing 1 / ${total}`;
+  elements.printProgress.textContent = `1 of ${total}`;
 }
 
 function updatePrintProgress(current, total) {
-  elements.printProgress.textContent = `Printing ${current} / ${total}`;
+  elements.printProgress.textContent = `${current} of ${total}`;
 }
 
 function stopPrintProgress() {
@@ -1461,6 +2048,7 @@ function applyTemplate(type) {
   state.selectedItem = 0;
   syncCanvasIntoSettings();
   renderCanvasFromState();
+  recordCanvasHistory();
   queuePreview();
   queueSave();
 }
@@ -1491,6 +2079,7 @@ function applySizePreset(size, button = null) {
   state.canvasItems = [];
   updateCanvasSurface();
   syncForm();
+  resetCanvasHistory();
   queuePreview();
   queueSave();
 }
@@ -1510,8 +2099,27 @@ function applyCustomSize() {
   });
   state.settings.label_width_mm = w;
   state.settings.label_height_mm = h;
+  state.canvasItems = [];
   updateCanvasSurface();
   syncForm();
+  resetCanvasHistory();
+  queuePreview();
+  queueSave();
+}
+
+function applyExpiryLabel(dateValue = elements.expiryDate.value) {
+  const formattedDate = formatExpiryDate(dateValue);
+  if (!formattedDate) {
+    showError("Pick an expiry date first");
+    return;
+  }
+
+  clearError();
+  state.canvasItems = buildExpiryCanvasItems(formattedDate);
+  state.selectedItem = 1;
+  syncCanvasIntoSettings();
+  syncForm();
+  recordCanvasHistory();
   queuePreview();
   queueSave();
 }
@@ -1523,6 +2131,12 @@ function initElements() {
     connectionType: $("connectionType"),
     connectionStatus: $("connectionStatus"),
     connectionTimer: $("connectionTimer"),
+    deviceConnectionBadge: $("deviceConnectionBadge"),
+    deviceConnectionDetail: $("deviceConnectionDetail"),
+    connectionTestBadge: $("connectionTestBadge"),
+    batteryPanel: $("batteryPanel"),
+    batteryMeter: $("batteryMeter"),
+    batteryText: $("batteryText"),
     printProgress: $("printProgress"),
     errorBar: $("errorBar"),
     themeToggle: $("themeToggle"),
@@ -1534,6 +2148,8 @@ function initElements() {
     closeHelp: $("closeHelp"),
     recentLabels: $("recentLabels"),
     printHistory: $("printHistory"),
+      expiryDate: $("expiryDate"),
+      applyExpiryButton: $("applyExpiryButton"),
       layer1Text: $("layer1Text"),
       layer1Mode: $("layer1Mode"),
       layer1Align: $("layer1Align"),
@@ -1547,27 +2163,41 @@ function initElements() {
       fontPicker: $("fontPicker"),
       fontSizeInput: $("fontSizeInput"),
       systemFontToggle: $("systemFontToggle"),
+      toggleBoldButton: $("toggleBoldButton"),
+      toggleUppercaseButton: $("toggleUppercaseButton"),
       addTextButton: $("addTextButton"),
       addQrButton: $("addQrButton"),
       addBarcodeButton: $("addBarcodeButton"),
       addImageButton: $("addImageButton"),
+      undoButton: $("undoButton"),
+      redoButton: $("redoButton"),
+      duplicateButton: $("duplicateButton"),
+      lockButton: $("lockButton"),
+      sendBackwardButton: $("sendBackwardButton"),
+      bringForwardButton: $("bringForwardButton"),
+      fitTextButton: $("fitTextButton"),
+      exportPngButton: $("exportPngButton"),
       imageUpload: $("imageUpload"),
       saveDesignButton: $("saveDesignButton"),
       loadDesignButton: $("loadDesignButton"),
+      savedDesigns: $("savedDesigns"),
       customWidth: $("customWidth"),
       customHeight: $("customHeight"),
       applyCustomSize: $("applyCustomSize"),
-      copies: $("copies"),
+    copies: $("copies"),
     copiesPlus: $("copiesPlus"),
     copiesMinus: $("copiesMinus"),
     portSelect: $("portSelect"),
+    connectPortButton: $("connectPortButton"),
     refreshPortsButton: $("refreshPortsButton"),
     bleDeviceSelect: $("bleDeviceSelect"),
     scanBleButton: $("scanBleButton"),
     connectBleButton: $("connectBleButton"),
     disconnectBleButton: $("disconnectBleButton"),
     testPrintButton: $("testPrintButton"),
+    stopPrintButton: $("stopPrintButton"),
     printButton: $("printButton"),
+    designCanvasViewport: $("designCanvasViewport"),
     designCanvas: $("designCanvas"),
     canvasSafe: $("canvasSafe"),
     vGuide: $("vGuide"),
@@ -1591,6 +2221,7 @@ function setBusy(busy, text) {
   }
   const controls = [
     elements.themeToggle,
+    elements.connectPortButton,
     elements.refreshPortsButton,
     elements.scanBleButton,
     elements.connectBleButton,
@@ -1601,6 +2232,24 @@ function setBusy(busy, text) {
   for (const control of controls) {
     control.disabled = busy;
   }
+  updateStopPrintButton();
+}
+
+function updateStopPrintButton() {
+  if (!elements.stopPrintButton) {
+    return;
+  }
+  elements.stopPrintButton.disabled = !state.printQueueActive;
+  elements.stopPrintButton.textContent = state.printStopRequested ? "Stopping..." : "Stop";
+}
+
+function requestStopPrintQueue() {
+  if (!state.busy) {
+    return;
+  }
+  state.printStopRequested = true;
+  updateStopPrintButton();
+  setStatus("Stopping queue...");
 }
 
 function updateConnectionUI() {
@@ -1610,30 +2259,120 @@ function updateConnectionUI() {
 
   let statusText = "";
   let statusClass = "";
+  let detailText = "";
 
   if (isBLE) {
     if (state.connecting) {
       statusText = "Connecting...";
       statusClass = "status-connecting";
+      detailText = `Connecting to ${state.settings.ble_device_name || state.settings.ble_device_address || "BLE device"}`;
     } else if (state.bleState.connected) {
       statusText = `Connected (${state.bleState.name || state.bleState.address})`;
       statusClass = "status-connected";
+      detailText = `BLE connected to ${state.bleState.name || state.bleState.address}`;
     } else {
       statusText = "Disconnected";
       statusClass = "status-disconnected";
+      detailText = state.settings.ble_device_name || state.settings.ble_device_address
+        ? `Ready to connect to ${state.settings.ble_device_name || state.settings.ble_device_address}`
+        : "No BLE device connected";
     }
   } else {
     if (!state.settings.port) {
       statusText = "Disconnected";
       statusClass = "status-disconnected";
-    } else {
-      statusText = `Ready (${state.settings.port})`;
+      detailText = "No COM port selected";
+    } else if (state.comConnecting) {
+      statusText = "Connecting...";
+      statusClass = "status-connecting";
+      detailText = `Opening COM printer on ${state.settings.port}`;
+    } else if (state.comConnected) {
+      statusText = `Connected (${state.settings.port})`;
       statusClass = "status-connected";
+      detailText = `COM printer connected on ${state.settings.port}`;
+    } else {
+      statusText = `Selected (${state.settings.port})`;
+      statusClass = "status-connecting";
+      detailText = `COM port ${state.settings.port} selected. Click Connect COM to open it.`;
     }
   }
 
   elements.connectionStatus.textContent = statusText;
   elements.connectionStatus.className = `status-indicator ${statusClass}`;
+  if (elements.deviceConnectionBadge) {
+    elements.deviceConnectionBadge.textContent = statusText;
+    elements.deviceConnectionBadge.className = `status-pill${statusClass === "status-disconnected" ? " muted" : ""}`;
+  }
+  if (elements.deviceConnectionDetail) {
+    elements.deviceConnectionDetail.textContent = detailText;
+  }
+}
+
+function updateBatteryUI() {
+  const level = Number(state.batteryLevel);
+  const showBattery = state.settings?.output_mode === "BLE" && state.bleState.connected;
+  const hasBattery = showBattery && Number.isFinite(level) && level > 0;
+
+  if (!showBattery) {
+    elements.batteryPanel.classList.add("hidden");
+    elements.batteryMeter.innerHTML = "";
+    elements.batteryText.textContent = "--%";
+    return;
+  }
+
+  if (!hasBattery) {
+    elements.batteryPanel.classList.remove("hidden");
+    elements.batteryMeter.innerHTML = "";
+    for (let index = 0; index < 5; index += 1) {
+      const block = document.createElement("span");
+      block.className = "battery-block";
+      elements.batteryMeter.appendChild(block);
+    }
+    elements.batteryText.textContent = "Unknown";
+    return;
+  }
+
+  const clamped = Math.max(0, Math.min(100, Math.round(level)));
+  const filledBlocks = Math.max(1, Math.ceil(clamped / 20));
+  elements.batteryPanel.classList.remove("hidden");
+  elements.batteryMeter.innerHTML = "";
+
+  for (let index = 0; index < 5; index += 1) {
+    const block = document.createElement("span");
+    block.className = "battery-block";
+    if (index < filledBlocks) {
+      block.classList.add("active");
+      if (clamped <= 20) {
+        block.classList.add("low");
+      } else if (clamped <= 40) {
+        block.classList.add("warn");
+      }
+    }
+    elements.batteryMeter.appendChild(block);
+  }
+
+  elements.batteryText.textContent = `${clamped}%`;
+}
+
+async function refreshBleBattery() {
+  const address = state.bleState.address || state.settings.ble_device_address;
+  if (!state.bleState.connected || !address) {
+    state.batteryLevel = null;
+    updateBatteryUI();
+    return;
+  }
+
+  try {
+    const result = await safeRequest("bleBattery", {
+      address,
+      pair: false,
+    });
+    state.batteryLevel = Number.isFinite(Number(result.battery)) ? Number(result.battery) : null;
+  } catch (_error) {
+    state.batteryLevel = null;
+  }
+
+  updateBatteryUI();
 }
 
 function startConnectionTimer() {
@@ -1672,6 +2411,46 @@ function fillSelect(select, items, getValue, getLabel) {
   }
 }
 
+async function runComConnect() {
+  try {
+    clearError();
+    readFormIntoState();
+    if (!state.settings.port) {
+      showError("Select a COM port first");
+      return;
+    }
+
+    state.comConnecting = true;
+    updateConnectionUI();
+    setBusy(true, "Connecting COM");
+    const result = await safeRequest("connectSerial", {
+      settings: state.settings,
+    });
+    state.settings.output_mode = "Printer";
+    state.comConnecting = false;
+    state.comConnected = true;
+    state.batteryLevel = null;
+    updateBatteryUI();
+    updateConnectionTestBadge("idle");
+      startConnectionTimer();
+      queueSave();
+      updateConnectionUI();
+    setStatus(`COM connected to ${result.port}`);
+  } catch (error) {
+    state.comConnecting = false;
+    state.comConnected = false;
+    state.batteryLevel = null;
+    updateBatteryUI();
+      updateConnectionTestBadge("fail");
+      stopConnectionTimer();
+      updateConnectionUI();
+      showError(error.message);
+  } finally {
+    state.comConnecting = false;
+    setBusy(false);
+  }
+}
+
 function prioritizeDevices(list, lastUsed) {
   if (!lastUsed) {
     return list;
@@ -1699,6 +2478,7 @@ function syncPorts() {
   } else {
     elements.portSelect.value = "";
     state.settings.port = "";
+    state.comConnected = false;
   }
 }
 
@@ -1736,14 +2516,20 @@ function syncForm() {
   elements.copies.value = state.settings.copies;
   elements.customWidth.value = String(state.settings.label_width_mm ?? "");
   elements.customHeight.value = String(state.settings.label_height_mm ?? "");
+  if (elements.expiryDate && !elements.expiryDate.value) {
+    elements.expiryDate.value = "";
+  }
   syncPorts();
-  syncBleDevices();
-  refreshBleStatus();
-  updateConnectionUI();
-  updateCanvasSurface();
+    syncBleDevices();
+    refreshBleStatus();
+    updateConnectionUI();
+    updateConnectionTestBadge();
+    updateBatteryUI();
+    updateCanvasSurface();
   updatePrintPreviewOrientation();
   buildCanvasItemsFromSettings();
   renderCanvasFromState();
+  renderSavedDesigns();
   state.isHydrating = false;
 }
 
@@ -1795,13 +2581,17 @@ function readFormIntoState() {
   state.settings.layer1.mode = elements.layer1Mode.value || "Text";
   state.settings.layer1.align = elements.layer1Align.value;
   state.settings.copies = Math.max(1, Number(elements.copies.value) || 1);
+  if (state.settings.port !== elements.portSelect.value) {
+    state.comConnected = false;
+    state.comConnecting = false;
+  }
   state.settings.port = elements.portSelect.value;
   state.settings.baud_rate = 115200;
   state.settings.ble_device_address = elements.bleDeviceSelect.value;
   state.settings.ble_device_name =
       state.bleDevices.find((item) => item.address === elements.bleDeviceSelect.value)?.name || "";
   state.settings.ble_write_char_uuid = state.bleWritable[0]?.uuid || "";
-  state.settings.output_mode = state.bleState.connected ? "BLE" : "Printer";
+  state.settings.output_mode = state.bleState.connected && !state.comConnected ? "BLE" : "Printer";
   syncCanvasIntoSettings();
 }
 
@@ -1961,6 +2751,7 @@ async function refreshPorts() {
   } else {
     elements.portSelect.value = "";
     state.settings.port = "";
+    state.comConnected = false;
   }
   if (elements.portSelect.value) {
     state.settings.port = elements.portSelect.value;
@@ -1969,7 +2760,7 @@ async function refreshPorts() {
   if (state.settings.port) {
     log(`Using COM port: ${state.settings.port}`);
   }
-  if (state.settings.output_mode !== "BLE" && state.settings.port) {
+  if (state.settings.output_mode !== "BLE" && state.settings.port && state.comConnected) {
     startConnectionTimer();
   } else if (state.settings.output_mode !== "BLE") {
     stopConnectionTimer();
@@ -1983,6 +2774,7 @@ async function refreshBleState() {
   state.bleState = result.state;
   refreshBleStatus();
   updateConnectionUI();
+  await refreshBleBattery();
 }
 
 async function runTestPrint() {
@@ -1996,8 +2788,10 @@ async function runTestPrint() {
     });
 
     log("Test print sent");
+    updateConnectionTestBadge("pass");
     setStatus("Test print complete");
   } catch (error) {
+    updateConnectionTestBadge("fail");
     showError(error.message);
   } finally {
     setBusy(false);
@@ -2015,7 +2809,9 @@ async function runPrint() {
     }
 
     const total = state.settings.copies || 1;
+    state.printStopRequested = false;
 
+    state.printQueueActive = true;
     setBusy(true, "Printing...");
     startPrintProgress(total);
     renderCanvasFromState();
@@ -2024,6 +2820,9 @@ async function runPrint() {
 
     let lastResult = null;
     for (let i = 1; i <= total; i += 1) {
+      if (state.printStopRequested) {
+        break;
+      }
       lastResult = await safeRequest("print", {
         settings: { ...rasterSettings, copies: 1 },
         imagePath: imageData,
@@ -2031,27 +2830,39 @@ async function runPrint() {
       updatePrintProgress(i, total);
     }
 
-    await refreshBleState();
-    if (lastResult?.mode === "BLE") {
-      log(
-        `BLE print sent: protocol=${lastResult.result.protocol}, bytes=${lastResult.result.bytes_sent}, packets=${lastResult.result.packet_count}, notifications=${lastResult.result.notification_count}`
-      );
-    } else if (lastResult?.mode === "Printer") {
-      log(`Serial print sent to ${lastResult.port}`);
+    if (lastResult) {
+      await refreshBleState();
+      updateConnectionTestBadge("pass");
+      if (lastResult?.mode === "BLE") {
+        log(
+          `BLE print sent: protocol=${lastResult.result.protocol}, bytes=${lastResult.result.bytes_sent}, packets=${lastResult.result.packet_count}, notifications=${lastResult.result.notification_count}`
+        );
+      } else if (lastResult?.mode === "Printer") {
+        log(`Serial print sent to ${lastResult.port}`);
+      }
     }
 
     stopPrintProgress();
-    saveRecentLabel(state.canvasItems.find((item) => item.type === "text")?.text || "");
-    addPrintHistory(true, "Print successful");
-    setStatus("Printed successfully");
-    showPrintSuccess();
+    if (state.printStopRequested) {
+      addPrintHistory(false, "Print queue stopped");
+      setStatus("Print queue stopped");
+      log("Print queue stopped by user");
+    } else {
+      saveRecentLabel(state.canvasItems.find((item) => item.type === "text")?.text || "");
+      addPrintHistory(true, "Print successful");
+      setStatus("Printed successfully");
+      showPrintSuccess();
+    }
   } catch (error) {
     log(`Print failed: ${error.message}`);
+    updateConnectionTestBadge("fail");
     stopPrintProgress();
     addPrintHistory(false, "Print failed");
     setStatus("Print failed");
     showError(error.message);
   } finally {
+    state.printQueueActive = false;
+    state.printStopRequested = false;
     stopPrintProgress();
     setBusy(false);
   }
@@ -2111,16 +2922,20 @@ async function runBleConnect(options = {}) {
       || state.bleState.name
       || "";
     state.settings.output_mode = "BLE";
+    state.comConnected = false;
     state.connecting = false;
     setBusy(false);
     syncForm();
     updateConnectionUI();
     startConnectionTimer();
+    await refreshBleBattery();
+    updateConnectionTestBadge("idle");
     queueSave();
     queuePreview();
     setStatus(`BLE connected to ${state.bleState.name || state.bleState.address}`);
   } catch (error) {
     state.connecting = false;
+    updateConnectionTestBadge("fail");
     log(`BLE connect failed: ${error.message}`);
     updateConnectionUI();
     if (!silent) {
@@ -2138,11 +2953,14 @@ async function runBleDisconnect() {
   try {
     setBusy(true, "Disconnecting BLE");
     const result = await safeRequest("disconnectBle");
-    state.bleState = result.state;
-    state.bleWritable = [];
-    state.bleNotify = [];
-    state.settings.ble_write_char_uuid = "";
-    state.settings.output_mode = "Printer";
+      state.bleState = result.state;
+      state.bleWritable = [];
+      state.bleNotify = [];
+      state.batteryLevel = null;
+      updateBatteryUI();
+      updateConnectionTestBadge("idle");
+      state.settings.ble_write_char_uuid = "";
+      state.settings.output_mode = "Printer";
     refreshBleStatus();
     updateConnectionUI();
     stopConnectionTimer();
@@ -2197,12 +3015,13 @@ function attachFormListeners() {
     state.previewTimer = setTimeout(updatePreview, 40);
   });
 
-    elements.layer1Text.addEventListener("change", () => {
+  elements.layer1Text.addEventListener("change", () => {
       if (state.isHydrating) {
         return;
       }
       clearError();
-    readFormIntoState();
+      readFormIntoState();
+      recordCanvasHistory();
       queueSave();
       queuePreview();
     });
@@ -2214,6 +3033,7 @@ function attachFormListeners() {
       state.canvasItems[state.selectedItem].font = elements.fontPicker.value;
       clearError();
       renderCanvasFromState();
+      recordCanvasHistory();
       queueSave();
       queuePreview();
     });
@@ -2250,6 +3070,38 @@ function attachFormListeners() {
       queueSave();
     });
 
+    elements.toggleBoldButton.addEventListener("click", () => {
+      if (state.selectedItem === null) {
+        return;
+      }
+      const item = state.canvasItems[state.selectedItem];
+      if (item.type !== "text") {
+        return;
+      }
+      item.fontWeight = Number(item.fontWeight) >= 700 ? 400 : 700;
+      syncCanvasIntoSettings();
+      renderCanvasFromState();
+      recordCanvasHistory();
+      queueSave();
+      queuePreview();
+    });
+
+    elements.toggleUppercaseButton.addEventListener("click", () => {
+      if (state.selectedItem === null) {
+        return;
+      }
+      const item = state.canvasItems[state.selectedItem];
+      if (item.type !== "text") {
+        return;
+      }
+      item.textTransform = item.textTransform === "uppercase" ? "none" : "uppercase";
+      syncCanvasIntoSettings();
+      renderCanvasFromState();
+      recordCanvasHistory();
+      queueSave();
+      queuePreview();
+    });
+
     elements.imageMode.addEventListener("change", updateImageSettings);
     elements.brightness.addEventListener("input", updateImageSettings);
     elements.contrast.addEventListener("input", updateImageSettings);
@@ -2284,9 +3136,9 @@ function attachFormListeners() {
     };
     reader.readAsDataURL(file);
   });
-  elements.saveDesignButton.addEventListener("click", () => {
+  elements.saveDesignButton.addEventListener("click", async () => {
     readFormIntoState();
-    saveDesign();
+    await saveDesign();
     setStatus("Design saved");
   });
   elements.loadDesignButton.addEventListener("click", () => {
@@ -2296,14 +3148,29 @@ function attachFormListeners() {
       setStatus("Design loaded");
     }
   });
+  elements.undoButton.addEventListener("click", undoCanvas);
+  elements.redoButton.addEventListener("click", redoCanvas);
+  elements.duplicateButton.addEventListener("click", duplicateSelectedItem);
+  elements.lockButton.addEventListener("click", toggleSelectedLock);
+  elements.sendBackwardButton.addEventListener("click", () => moveSelectedLayer("backward"));
+  elements.bringForwardButton.addEventListener("click", () => moveSelectedLayer("forward"));
+  elements.fitTextButton.addEventListener("click", fitSelectedTextToBox);
+  elements.exportPngButton.addEventListener("click", exportCurrentDesignPng);
   elements.copiesPlus.addEventListener("click", () => adjustCopies(1));
   elements.copiesMinus.addEventListener("click", () => adjustCopies(-1));
   elements.applyCustomSize.addEventListener("click", applyCustomSize);
+  elements.applyExpiryButton.addEventListener("click", () => applyExpiryLabel());
+  elements.expiryDate.addEventListener("change", () => {
+    clearError();
+    applyExpiryLabel(elements.expiryDate.value);
+  });
+  elements.connectPortButton.addEventListener("click", runComConnect);
   elements.refreshPortsButton.addEventListener("click", refreshPorts);
   elements.scanBleButton.addEventListener("click", runBleScan);
   elements.connectBleButton.addEventListener("click", runBleConnect);
   elements.disconnectBleButton.addEventListener("click", runBleDisconnect);
   elements.testPrintButton.addEventListener("click", runTestPrint);
+  elements.stopPrintButton.addEventListener("click", requestStopPrintQueue);
   elements.printButton.addEventListener("click", runPrint);
 
   document.querySelectorAll("[data-size]").forEach((button) => {
@@ -2325,6 +3192,12 @@ function attachFormListeners() {
     });
   });
 
+  document.querySelectorAll("[data-symbol]").forEach((button) => {
+    button.addEventListener("click", () => {
+      insertSymbol(button.dataset.symbol || "");
+    });
+  });
+
   elements.layer1Mode.addEventListener("change", () => {
     if (state.isHydrating || state.selectedItem === null) {
       return;
@@ -2343,6 +3216,7 @@ function attachFormListeners() {
     }
     syncCanvasIntoSettings();
     renderCanvasFromState();
+    recordCanvasHistory();
     queueSave();
     queuePreview();
   });
@@ -2370,23 +3244,28 @@ async function boot() {
     state.settings.ble_device_address = "";
     state.settings.ble_device_name = "";
     state.bleState = { connected: false, address: "", name: "" };
+    state.comConnected = false;
     syncStaticChoices(initData);
     forceSimpleDefaults();
     await loadFonts();
+    loadSavedDesigns();
     renderRecentLabels();
     renderPrintHistory();
     await refreshPorts();
     await refreshBleState();
     stopConnectionTimer();
+    const startupCanvas = getCanvasLogicalSize();
+    const startupWidth = 200;
+    const startupHeight = 60;
     state.canvasItems = [
       makeCanvasItem("text", {
         id: 1,
         key: "layer1",
         text: "Label",
-        x: 80,
-        y: 80,
-        width: 200,
-        height: 60,
+        x: Math.max(0, Math.round((startupCanvas.width - startupWidth) / 2)),
+        y: Math.max(0, Math.round((startupCanvas.height - startupHeight) / 2)),
+        width: startupWidth,
+        height: startupHeight,
       }),
     ];
     state.selectedItem = 0;
@@ -2395,6 +3274,8 @@ async function boot() {
     updatePrintPreviewOrientation();
     syncForm();
     renderCanvasFromState();
+    resetCanvasHistory();
+    updateCanvasActionButtons();
     await updatePreview();
     setStatus("Ready");
   }

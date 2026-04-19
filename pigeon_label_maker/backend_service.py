@@ -9,7 +9,7 @@ import sys
 import traceback
 from typing import Any
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from .config import load_settings, load_user_presets, save_settings
 from .models import ALIGNMENTS, LAYER_MODES, LINE_MODES, OUTPUT_MODES, AppSettings
@@ -18,6 +18,7 @@ from .printing import (
     PROFILE_TEMPLATES,
     apply_print_processing,
     ble_connection_state,
+    connect_serial,
     connect_ble_async,
     disconnect_ble,
     discover_ble_devices,
@@ -27,6 +28,7 @@ from .printing import (
     run_ble_coro_in_worker,
     send_to_ble_printer,
     send_to_printer,
+    print_pixel_size,
     validate_settings,
 )
 from .rendering import list_font_names, render_label
@@ -116,13 +118,27 @@ def command_export_png(params: dict[str, Any]) -> dict[str, Any]:
     settings = build_settings(params.get("settings"))
     current_image = load_optional_image(params.get("imagePath"))
     output_path = Path(params["outputPath"])
-    rendered = render_label(settings, current_image)
+    if current_image is not None:
+        rendered = current_image
+    else:
+        rendered = render_label(settings, current_image)
     rendered.save(output_path, format="PNG")
     return {"path": str(output_path)}
 
 
 def command_list_serial_ports(_params: dict[str, Any]) -> dict[str, Any]:
     return {"ports": list_serial_ports()}
+
+
+def command_connect_serial(params: dict[str, Any]) -> dict[str, Any]:
+    settings = build_settings(params.get("settings"))
+    if not settings.port.strip():
+        raise ValueError("Select a printer port first.")
+    connect_serial(settings)
+    return {
+        "mode": "Printer",
+        "port": settings.port,
+    }
 
 
 def command_scan_ble(params: dict[str, Any]) -> dict[str, Any]:
@@ -159,7 +175,9 @@ async def get_ble_battery_async(address: str, pair: bool = False) -> int | None:
                     if "2a19" in str(characteristic.uuid).lower():
                         data = await client.read_gatt_char(characteristic.uuid)
                         if data:
-                            return int(data[0])
+                            level = int(data[0])
+                            if 1 <= level <= 100:
+                                return level
     except Exception:
         return None
 
@@ -174,7 +192,7 @@ def command_ble_battery(params: dict[str, Any]) -> dict[str, Any]:
         return {"battery": None}
 
     level = run_ble_coro_in_worker(get_ble_battery_async(address, pair))
-    return {"battery": level}
+    return {"battery": level if level and 1 <= int(level) <= 100 else None}
 
 
 def command_inspect_ble(params: dict[str, Any]) -> dict[str, Any]:
@@ -219,16 +237,95 @@ def command_print(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def load_test_print_font(size: int) -> ImageFont.ImageFont:
+    for font_name in ("DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf"):
+        try:
+            return ImageFont.truetype(font_name, size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def draw_centered_text(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    text: str,
+    font: ImageFont.ImageFont,
+) -> None:
+    left, top, right, bottom = box
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    x = left + ((right - left - text_width) / 2)
+    y = top + ((bottom - top - text_height) / 2) - bbox[1]
+    draw.text((x, y), text, fill="black", font=font)
+
+
+def build_test_print_image(settings: AppSettings) -> Image.Image:
+    target_height, target_width = print_pixel_size(settings)
+    scale = 4
+    width = max(480, target_width * scale)
+    height = max(180, target_height * scale)
+
+    rendered = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(rendered)
+
+    padding = max(20, round(min(width, height) * 0.08))
+    border_width = max(8, round(min(width, height) * 0.025))
+    radius = max(20, round(min(width, height) * 0.08))
+
+    draw.rounded_rectangle(
+        (padding, padding, width - padding, height - padding),
+        radius=radius,
+        outline="black",
+        width=border_width,
+        fill="white",
+    )
+
+    top_band_height = round((height - (padding * 2)) * 0.62)
+    divider_y = padding + top_band_height
+    draw.line(
+        (padding + border_width, divider_y, width - padding - border_width, divider_y),
+        fill="black",
+        width=max(6, border_width // 2),
+    )
+
+    title_font = load_test_print_font(max(64, round(height * 0.28)))
+    subtitle_font = load_test_print_font(max(30, round(height * 0.12)))
+
+    draw_centered_text(
+        draw,
+        (
+            padding + border_width,
+            padding + border_width,
+            width - padding - border_width,
+            divider_y - border_width,
+        ),
+        "TEST PRINT",
+        title_font,
+    )
+    draw_centered_text(
+        draw,
+        (
+            padding + border_width,
+            divider_y + border_width,
+            width - padding - border_width,
+            height - padding - border_width,
+        ),
+        f"{int(round(settings.label_width_mm))}x{int(round(settings.label_height_mm))} mm",
+        subtitle_font,
+    )
+
+    return rendered
+
+
 def command_test_print(params: dict[str, Any]) -> dict[str, Any]:
     settings = build_settings(params.get("settings"))
     errors = validate_settings(settings)
     if errors:
         raise ValueError("\n".join(errors))
 
-    rendered = Image.new("RGB", (384, 120), "white")
-    draw = ImageDraw.Draw(rendered)
-    draw.text((12, 42), "TEST PRINT", fill="black")
-
+    rendered = build_test_print_image(settings)
     print_ready = apply_print_processing(rendered, settings)
 
     from .printing import build_print_command
@@ -254,6 +351,7 @@ COMMANDS = {
     "preview": command_preview,
     "exportPng": command_export_png,
     "listSerialPorts": command_list_serial_ports,
+    "connectSerial": command_connect_serial,
     "scanBle": command_scan_ble,
     "connectBle": command_connect_ble,
     "disconnectBle": command_disconnect_ble,

@@ -13,6 +13,9 @@ Pigeon Label Maker is a Windows label design and thermal printing app for small 
 - Test print action
 - Local recent label history
 - Save and load design layout in the Electron UI
+- Undo, redo, duplicate, lock, layer order, and keyboard nudge tools
+- Expiry label helper and quick symbol picker
+- Saved design thumbnails and PNG export
 - Windows installer build via Electron Builder and PyInstaller
 
 ## Main Features
@@ -20,10 +23,14 @@ Pigeon Label Maker is a Windows label design and thermal printing app for small 
 ### Designer
 
 - Add text, QR, barcode, and image elements
-- Drag, resize, rotate, align, and delete selected items
+- Drag, resize, rotate, align, edit, and delete selected items
 - Canvas safe area, center guides, and sticky edge bounds
+- Snap to canvas center and other elements
 - Font picker, manual font size, and optional system font discovery
+- Bold and uppercase toggles for text elements
 - Template shortcuts for `Text`, `Dual`, `QR`, and `Barcode`
+- Quick symbol buttons for common label characters such as `°`, `%`, `£`, `€`, `©`, and `✓`
+- Undo, redo, duplicate, lock, bring forward, send backward, fit text to box, and export PNG tools
 
 ### Print Pipeline
 
@@ -36,19 +43,25 @@ Pigeon Label Maker is a Windows label design and thermal printing app for small 
 
 ### Connections
 
-- Serial COM printing
+- Serial COM printing with explicit `Connect COM`
 - BLE scan, connect, disconnect, inspect, battery query, and print
 - Persistent connection handling so normal print jobs do not intentionally tear down the printer session
 - COM speed is fixed to `115200` in the Electron UI
+- Connection feedback includes connection status, timer, test badge, and BLE battery panel
+- BLE battery now prefers showing `Unknown` over a false dead reading when the printer does not expose a reliable value
 
 ### UX
 
 - One-time onboarding overlay
 - Help overlay
-- Inline error bar instead of modal popups
+- Inline error messaging in the Connection panel instead of modal popups
+- Human-readable connection error text
 - Print progress for multi-copy jobs
+- Queue progress beside the copies control
+- Stop button for active print queues
 - Print success pulse
 - Connection type, status, and timer in the action bar
+- Three-column layout with the Connection panel on the right
 
 ## Project Structure
 
@@ -125,9 +138,10 @@ python main.py
 3. Add text, QR, barcode, or image elements from the Designer panel.
 4. Move and resize elements on the canvas.
 5. Adjust image processing settings if you are printing artwork or photos.
-6. Select a COM port or scan and connect over BLE.
+6. Select a COM port and click `Connect COM`, or scan and connect over BLE.
 7. Use `Test Print` if you want to confirm the connection first.
-8. Click `Print Label`.
+8. Set copies if needed and use `Stop` to stop the remaining queue after the current label.
+9. Click `Print Label`.
 
 ## Keyboard Shortcuts
 
@@ -137,6 +151,11 @@ python main.py
 - `Ctrl+T`: Toggle theme
 - `Ctrl+M`: Toggle simple or advanced mode
 - `Delete`: Delete selected canvas item
+- `Ctrl+Z`: Undo
+- `Ctrl+Y`: Redo
+- `Ctrl+D`: Duplicate selected item
+- `Arrow Keys`: Nudge selected item
+- `Shift+Arrow Keys`: Larger nudge step
 
 ## Connection Notes
 
@@ -144,6 +163,7 @@ python main.py
 
 - COM ports are not auto-selected on startup
 - Pick the port you want from the Connection panel
+- Click `Connect COM` before printing
 - The Electron UI keeps the COM speed fixed to `115200`
 
 ### BLE
@@ -169,6 +189,7 @@ The Electron UI also stores some local browser-style state such as:
 - onboarding completion
 - recent labels
 - saved canvas design
+- saved design thumbnail gallery
 
 ## Testing
 
@@ -205,6 +226,7 @@ Expected outputs:
 ### Printer does not print
 
 - confirm the correct COM port or BLE device is selected
+- for COM, click `Connect COM` first
 - use `Test Print` first
 - verify the printer accepts TSPL commands
 
@@ -219,6 +241,7 @@ Expected outputs:
 - rescan if the device list is stale
 - reconnect manually if the printer was powered off and back on
 - some printers expose several writable characteristics, but the app will prefer the known printer one automatically
+- battery level may show `Unknown` on devices that do not expose a reliable BLE battery value
 
 ## Development Notes
 

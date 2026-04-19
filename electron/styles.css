@@ -75,14 +75,15 @@ body {
 
 .shell {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 280px minmax(0, 1fr) 280px;
   gap: 18px;
   min-height: 100vh;
   padding: 18px;
 }
 
 .sidebar,
-.workspace {
+.workspace,
+.connection-rail {
   min-height: 0;
 }
 
@@ -103,6 +104,20 @@ body {
   align-items: stretch;
   justify-content: stretch;
   overflow: hidden;
+}
+
+.connection-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  max-height: 100vh;
+  padding-left: 4px;
+}
+
+.connection-rail .panel {
+  position: sticky;
+  top: 18px;
 }
 
 .workspace > * {
@@ -281,6 +296,7 @@ body {
 .panel-head h2 {
   font-size: 0.9rem;
   margin-bottom: 6px;
+  color: var(--accent);
 }
 
 button.panel-head {
@@ -320,8 +336,79 @@ button.panel-head h2 {
   align-items: end;
 }
 
+.connection-actions {
+  align-items: stretch;
+}
+
 .ble-disconnect {
   grid-column: span 2;
+}
+
+.connection-feedback {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-strong);
+}
+
+.connection-detail {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.battery-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.battery-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.battery-meter {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.battery-block {
+  height: 12px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+}
+
+.battery-block.active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.battery-block.warn {
+  background: #d9a000;
+  border-color: #d9a000;
+}
+
+.battery-block.low {
+  background: #d64545;
+  border-color: #d64545;
+}
+
+.battery-text {
+  min-width: 56px;
+  text-align: right;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .eyebrow {
@@ -406,7 +493,34 @@ button.panel-head h2 {
 .field span {
   font-size: 0.8rem;
   font-weight: 700;
-  color: var(--muted);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.action-copies {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-strong);
+}
+
+.action-copies span {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -418,8 +532,26 @@ button.panel-head h2 {
   margin-bottom: 12px;
 }
 
+.tool-grid.compact {
+  grid-template-columns: 1fr 1fr;
+}
+
 .tool-grid button {
   min-height: 38px;
+}
+
+.symbol-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.symbol-button {
+  min-height: 32px;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .align-controls {
@@ -597,6 +729,12 @@ button:disabled {
   border: 1px solid var(--ghost-border);
 }
 
+.ghost.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: rgba(0, 191, 165, 0.45);
+}
+
 .ghost.small {
   min-height: 34px;
   padding-inline: 12px;
@@ -608,6 +746,36 @@ button:disabled {
   font-size: 0.92rem;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.saved-designs {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.saved-design-card {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  text-align: left;
+}
+
+.saved-design-card img {
+  width: 60px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+}
+
+.saved-design-card span {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .top-gap {
@@ -661,6 +829,15 @@ button:disabled {
   display: none;
 }
 
+.connection-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  background: rgba(200, 60, 60, 0.1);
+  border-color: rgba(200, 60, 60, 0.18);
+}
+
 .connection-info {
   display: flex;
   flex-direction: column;
@@ -710,7 +887,8 @@ button:disabled {
 .print-progress {
   font-size: 0.8rem;
   color: var(--muted);
-  margin-top: 4px;
+  margin-left: 4px;
+  white-space: nowrap;
 }
 
 .print-progress.active {
@@ -754,6 +932,7 @@ button:disabled {
   margin: 0 0 10px;
   font-family: "Georgia", "Times New Roman", serif;
   letter-spacing: 0.01em;
+  color: var(--accent);
 }
 
 .preview-frame {
@@ -790,12 +969,20 @@ button:disabled {
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
+.design-canvas-viewport {
+  width: 100%;
+  height: 100%;
+  min-height: 170px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
 .design-canvas {
   position: relative;
-  width: min(100%, 860px);
-  height: auto;
-  aspect-ratio: var(--label-aspect, 40 / 14);
-  max-height: 38vh;
+  width: 320px;
+  height: 112px;
   background: #ffffff;
   overflow: hidden;
   display: flex;
@@ -805,6 +992,7 @@ button:disabled {
   background-position: center;
   background-size: contain;
   transition: opacity 0.15s ease, transform 0.15s ease;
+  transform-origin: center center;
 }
 
 .design-canvas.capture-render .canvas-safe,
@@ -812,6 +1000,7 @@ button:disabled {
 .design-canvas.capture-render .resize-handle,
 .design-canvas.capture-render .rotate-handle,
 .design-canvas.capture-render .rotate-line,
+.design-canvas.capture-render .edit-btn,
 .design-canvas.capture-render .delete-btn {
   display: none !important;
 }
@@ -895,6 +1084,10 @@ button:disabled {
 .canvas-item.selected {
   outline: 2px dashed var(--accent);
   overflow: visible;
+}
+
+.canvas-item.locked {
+  cursor: default;
 }
 
 .canvas-item.editing {
@@ -1143,6 +1336,16 @@ button:disabled {
     grid-template-columns: 280px 1fr;
   }
 
+  .connection-rail {
+    grid-column: 1 / -1;
+    max-height: none;
+    padding-left: 0;
+  }
+
+  .connection-rail .panel {
+    position: static;
+  }
+
   .preview-grid {
     grid-template-columns: 1fr;
   }
@@ -1157,7 +1360,8 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .sidebar {
+  .sidebar,
+  .connection-rail {
     max-height: none;
   }
 

@@ -32,23 +32,17 @@
           </div>
         </div>
 
-        <section class="panel sidebar-section" data-section-id="template">
-          <button class="panel-head section-toggle" type="button" aria-expanded="true">
-            <h2>Template</h2>
-            <span class="section-chevron" aria-hidden="true"></span>
-          </button>
+        
 
-          <div class="section-body">
-            <div class="template-grid">
-              <button data-template="text" type="button">Text</button>
-              <button data-template="dual" type="button">Dual</button>
-              <button data-template="qr" type="button">QR</button>
-              <button data-template="barcode" type="button">Barcode</button>
-            </div>
-          </div>
-        </section>
+        
 
-        <section class="panel sidebar-section" data-section-id="designer">
+        
+
+        
+
+        
+
+      <section class="panel sidebar-section" data-section-id="designer">
           <button class="panel-head section-toggle" type="button" aria-expanded="true">
             <h2>Designer</h2>
             <span class="section-chevron" aria-hidden="true"></span>
@@ -58,11 +52,59 @@
               <span>YOUR TEXT</span>
               <input id="layer1Text" type="text" placeholder="Edit selected item" />
             </label>
+            <div class="field top-gap">
+              <span>Symbols</span>
+              <div class="symbol-grid">
+                <button class="ghost symbol-button" data-symbol="°" type="button" title="Insert degree symbol">°</button>
+                <button class="ghost symbol-button" data-symbol="%" type="button" title="Insert percent symbol">%</button>
+                <button class="ghost symbol-button" data-symbol="/" type="button" title="Insert slash">/</button>
+                <button class="ghost symbol-button" data-symbol="&" type="button" title="Insert ampersand">&amp;</button>
+                <button class="ghost symbol-button" data-symbol="@" type="button" title="Insert at symbol">@</button>
+                <button class="ghost symbol-button" data-symbol="#" type="button" title="Insert hash">#</button>
+                <button class="ghost symbol-button" data-symbol="£" type="button" title="Insert pound symbol">£</button>
+                <button class="ghost symbol-button" data-symbol="€" type="button" title="Insert euro symbol">€</button>
+                <button class="ghost symbol-button" data-symbol="©" type="button" title="Insert copyright symbol">©</button>
+                <button class="ghost symbol-button" data-symbol="™" type="button" title="Insert trademark symbol">™</button>
+                <button class="ghost symbol-button" data-symbol="×" type="button" title="Insert multiplication symbol">×</button>
+                <button class="ghost symbol-button" data-symbol="✓" type="button" title="Insert tick symbol">✓</button>
+              </div>
+            </div>
+            <div class="grid two top-gap">
+              <label class="field">
+                <span>Font</span>
+                <select id="fontPicker"></select>
+              </label>
+              <label class="field">
+                <span>Size</span>
+                <input id="fontSizeInput" type="number" min="6" max="200" />
+              </label>
+            </div>
+            <label class="field top-gap">
+              <span>Use System Fonts</span>
+              <label class="toggle" for="systemFontToggle">
+                <input id="systemFontToggle" type="checkbox" />
+                <span>Enable</span>
+              </label>
+            </label>
+            <div class="grid two top-gap">
+              <button id="toggleBoldButton" class="ghost" type="button">Bold</button>
+              <button id="toggleUppercaseButton" class="ghost" type="button">Uppercase</button>
+            </div>
             <div class="tool-grid">
               <button id="addTextButton" class="ghost" type="button">Add Text</button>
               <button id="addQrButton" class="ghost" type="button">Add QR</button>
               <button id="addBarcodeButton" class="ghost" type="button">Add Barcode</button>
               <button id="addImageButton" class="ghost" type="button">Add Image</button>
+            </div>
+            <div class="tool-grid compact top-gap">
+              <button id="undoButton" class="ghost" type="button">Undo</button>
+              <button id="redoButton" class="ghost" type="button">Redo</button>
+              <button id="duplicateButton" class="ghost" type="button">Duplicate</button>
+              <button id="lockButton" class="ghost" type="button">Lock</button>
+              <button id="sendBackwardButton" class="ghost" type="button">Send Back</button>
+              <button id="bringForwardButton" class="ghost" type="button">Bring Front</button>
+              <button id="fitTextButton" class="ghost" type="button">Fit Text</button>
+              <button id="exportPngButton" class="ghost" type="button">Export PNG</button>
             </div>
             <div class="align-controls top-gap">
             <button data-align="left" class="ghost" type="button" aria-label="Align left" title="Align left">
@@ -113,6 +155,7 @@
               <button id="saveDesignButton" class="ghost" type="button">Save Design</button>
               <button id="loadDesignButton" class="ghost" type="button">Load Design</button>
             </div>
+            <div id="savedDesigns" class="saved-designs top-gap"></div>
             <div class="grid two">
               <div class="advanced">
                 <label class="field">
@@ -163,46 +206,41 @@
               <span>Threshold</span>
               <input id="threshold" type="range" min="0" max="255" value="180" />
             </label>
-            <div class="grid two top-gap">
-              <label class="field">
-                <span>Font</span>
-                <select id="fontPicker"></select>
-              </label>
-              <label class="field">
-                <span>Size</span>
-                <input id="fontSizeInput" type="number" min="6" max="200" />
-              </label>
-            </div>
-            <label class="field top-gap">
-              <span>Use System Fonts</span>
-              <label class="toggle" for="systemFontToggle">
-                <input id="systemFontToggle" type="checkbox" />
-                <span>Enable</span>
-              </label>
-            </label>
-            <label class="field top-gap">
-              <span>Copies</span>
-              <div class="copies-control">
-                <button id="copiesMinus" class="ghost small" type="button">-</button>
-                <input id="copies" type="number" min="1" value="1" />
-                <button id="copiesPlus" class="ghost small" type="button">+</button>
-              </div>
-            </label>
           </div>
         </section>
 
-        <section class="panel sidebar-section" data-section-id="recent">
+<section class="panel sidebar-section" data-section-id="expiry">
           <button class="panel-head section-toggle" type="button" aria-expanded="true">
-            <h2>Recent</h2>
+            <h2>Expiry</h2>
+            <span class="section-chevron" aria-hidden="true"></span>
+          </button>
+          <div class="section-body">
+            <label class="field">
+              <span>Expiry Date</span>
+              <input id="expiryDate" type="date" />
+            </label>
+            <button id="applyExpiryButton" class="ghost top-gap" type="button">Apply Expiry</button>
+            <p class="hint">Creates an expiry label automatically in the format: Expires 15/11/2026</p>
+          </div>
+        </section>
+
+<section class="panel sidebar-section" data-section-id="template">
+          <button class="panel-head section-toggle" type="button" aria-expanded="true">
+            <h2>Template</h2>
             <span class="section-chevron" aria-hidden="true"></span>
           </button>
 
           <div class="section-body">
-            <div id="recentLabels" class="recent-list"></div>
+            <div class="template-grid">
+              <button data-template="text" type="button">Text</button>
+              <button data-template="dual" type="button">Dual</button>
+              <button data-template="qr" type="button">QR</button>
+              <button data-template="barcode" type="button">Barcode</button>
+            </div>
           </div>
         </section>
 
-        <section class="panel sidebar-section" data-section-id="size">
+<section class="panel sidebar-section" data-section-id="size">
           <button class="panel-head section-toggle" type="button" aria-expanded="true">
             <h2>Size</h2>
             <span class="section-chevron" aria-hidden="true"></span>
@@ -222,35 +260,17 @@
           </div>
         </section>
 
-        <section class="panel sidebar-section" data-section-id="connection">
+<section class="panel sidebar-section" data-section-id="recent">
           <button class="panel-head section-toggle" type="button" aria-expanded="true">
-            <h2>Connection</h2>
+            <h2>Recent</h2>
             <span class="section-chevron" aria-hidden="true"></span>
           </button>
+
           <div class="section-body">
-            <div class="grid two connection-block">
-              <label class="field">
-                <span>COM Port</span>
-                <select id="portSelect"></select>
-              </label>
-            </div>
-            <div class="advanced">
-              <button id="refreshPortsButton" class="ghost top-gap">Refresh Ports</button>
-            </div>
-            <div class="panel-head top-gap">
-              <h2>BLE</h2>
-            </div>
-            <div class="grid two connection-block">
-              <button id="scanBleButton" class="ghost">Scan</button>
-              <button id="connectBleButton" class="ghost">Connect</button>
-              <button id="disconnectBleButton" class="ghost ble-disconnect">Disconnect</button>
-            </div>
-            <label class="field top-gap">
-              <span>Device</span>
-              <select id="bleDeviceSelect"></select>
-            </label>
+            <div id="recentLabels" class="recent-list"></div>
           </div>
         </section>
+
       </aside>
 
       <main class="workspace">
@@ -259,12 +279,24 @@
             <span id="connectionType">COM</span>
             <span id="connectionStatus" class="status-indicator">Disconnected</span>
             <span id="connectionTimer" class="connection-timer hidden">00:00</span>
-            <div id="printProgress" class="print-progress hidden"></div>
           </div>
 
           <div class="action-buttons">
+            <div class="action-copies">
+              <span>Copies</span>
+              <div class="copies-control">
+                <button id="copiesMinus" class="ghost small" type="button">-</button>
+                <input id="copies" type="number" min="1" value="1" />
+                <button id="copiesPlus" class="ghost small" type="button">+</button>
+              </div>
+              <div id="printProgress" class="print-progress hidden"></div>
+            </div>
             <button id="testPrintButton" class="ghost">
               Test Print
+            </button>
+
+            <button id="stopPrintButton" class="ghost" disabled>
+              Stop
             </button>
 
             <button id="printButton" class="primary large">
@@ -273,16 +305,16 @@
           </div>
         </section>
 
-        <div id="errorBar" class="error-bar hidden"></div>
-
         <section class="preview-grid hero-preview">
           <article class="preview-card">
             <h3>Design</h3>
               <div class="preview-frame large">
-                <div id="designCanvas" class="design-canvas">
-                  <div id="canvasSafe" class="canvas-safe"></div>
-                  <div id="vGuide" class="guide-line vertical hidden"></div>
-                  <div id="hGuide" class="guide-line horizontal hidden"></div>
+                <div id="designCanvasViewport" class="design-canvas-viewport">
+                  <div id="designCanvas" class="design-canvas">
+                    <div id="canvasSafe" class="canvas-safe"></div>
+                    <div id="vGuide" class="guide-line vertical hidden"></div>
+                    <div id="hGuide" class="guide-line horizontal hidden"></div>
+                  </div>
                 </div>
               </div>
           </article>
@@ -302,6 +334,50 @@
           <div id="printHistory" class="history-list"></div>
         </section>
       </main>
+
+      <aside class="connection-rail">
+        <section class="panel sidebar-section" data-section-id="connection">
+          <button class="panel-head section-toggle" type="button" aria-expanded="true">
+            <h2>Connection</h2>
+            <span class="section-chevron" aria-hidden="true"></span>
+          </button>
+          <div class="section-body">
+            <div class="grid two connection-block">
+              <label class="field">
+                <span>COM Port</span>
+                <select id="portSelect"></select>
+              </label>
+            </div>
+            <div class="grid two top-gap connection-actions">
+              <button id="connectPortButton" class="ghost" type="button">Connect COM</button>
+              <button id="refreshPortsButton" class="ghost" type="button">Refresh Ports</button>
+            </div>
+            <div class="connection-feedback top-gap">
+              <span id="deviceConnectionBadge" class="status-pill muted">Disconnected</span>
+              <p id="deviceConnectionDetail" class="connection-detail">No printer connected</p>
+              <span id="connectionTestBadge" class="status-pill muted">Not tested</span>
+              <div id="errorBar" class="error-bar connection-error hidden"></div>
+              <div id="batteryPanel" class="battery-panel hidden">
+                <span class="battery-label">Battery</span>
+                <div id="batteryMeter" class="battery-meter" aria-label="Battery level"></div>
+                <span id="batteryText" class="battery-text">--%</span>
+              </div>
+            </div>
+            <div class="panel-head top-gap">
+              <h2>BLE</h2>
+            </div>
+            <div class="grid two connection-block">
+              <button id="scanBleButton" class="ghost">Scan</button>
+              <button id="connectBleButton" class="ghost">Connect</button>
+              <button id="disconnectBleButton" class="ghost ble-disconnect">Disconnect</button>
+            </div>
+            <label class="field top-gap">
+              <span>Device</span>
+              <select id="bleDeviceSelect"></select>
+            </label>
+          </div>
+        </section>
+      </aside>
     </div>
 
     <div id="onboardingOverlay" class="onboarding hidden">

@@ -351,6 +351,28 @@ def send_to_printer(command: bytes, settings: AppSettings) -> None:
         raise
 
 
+def connect_serial(settings: AppSettings) -> None:
+    global _serial_connection, _serial_connection_baud_rate, _serial_connection_port
+
+    target_port = settings.port.strip()
+    target_baud_rate = int(settings.baud_rate)
+    if not target_port:
+        raise ValueError("Printer port is required.")
+
+    needs_new_connection = (
+        _serial_connection is None
+        or not getattr(_serial_connection, "is_open", False)
+        or _serial_connection_port != target_port
+        or _serial_connection_baud_rate != target_baud_rate
+    )
+
+    if needs_new_connection:
+        disconnect_serial()
+        _serial_connection = serial.Serial(target_port, target_baud_rate, timeout=2)
+        _serial_connection_port = target_port
+        _serial_connection_baud_rate = target_baud_rate
+
+
 def disconnect_serial() -> None:
     global _serial_connection, _serial_connection_baud_rate, _serial_connection_port
 
