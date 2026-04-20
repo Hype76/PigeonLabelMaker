@@ -181,6 +181,7 @@ body {
   transform: rotate(45deg);
   transition: transform 0.15s ease;
   flex: 0 0 auto;
+  pointer-events: none;
 }
 
 .sidebar-section.collapsed .section-chevron {
@@ -311,6 +312,7 @@ button.panel-head {
 
 button.panel-head h2 {
   margin-bottom: 0;
+  pointer-events: none;
 }
 
 .brand-card h1 {
@@ -756,24 +758,25 @@ button:disabled {
 
 .saved-design-card {
   display: grid;
-  grid-template-columns: 60px 1fr;
-  gap: 10px;
+  grid-template-columns: 48px 1fr;
+  gap: 8px;
   align-items: center;
-  padding: 8px;
+  padding: 6px 8px;
   text-align: left;
+  min-height: 48px;
 }
 
 .saved-design-card img {
-  width: 60px;
-  height: 28px;
+  width: 48px;
+  height: 22px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
   background: #ffffff;
 }
 
 .saved-design-card span {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--text);
 }

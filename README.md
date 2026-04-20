@@ -1,6 +1,6 @@
 # Pigeon Label Maker
 
-Pigeon Label Maker is a Windows label design and thermal printing app for small TSPL-compatible label printers. The main desktop experience is now an Electron shell backed by a Python rendering and print engine. A Tkinter frontend still exists as a fallback, but the Electron app is the primary UI.
+Pigeon Label Maker is a Windows label design and thermal printing app for small TSPL-compatible label printers. The desktop experience is an Electron shell backed by a Python rendering and print engine.
 
 ## Current App Overview
 
@@ -68,8 +68,6 @@ Pigeon Label Maker is a Windows label design and thermal printing app for small 
 ```text
 PigeonLabelMaker/
 |-- backend_entry.py
-|-- build.ps1
-|-- main.py
 |-- package.json
 |-- package-lock.json
 |-- README.md
@@ -85,7 +83,6 @@ PigeonLabelMaker/
 |   |-- styles.css
 |-- pigeon_label_maker/
 |   |-- __init__.py
-|   |-- app.py
 |   |-- backend_service.py
 |   |-- config.py
 |   |-- models.py
@@ -123,12 +120,6 @@ Electron starts the Python backend automatically. In development it runs:
 
 ```powershell
 python -m pigeon_label_maker.backend_service
-```
-
-### Tkinter Fallback
-
-```powershell
-python main.py
 ```
 
 ## How to Use
@@ -180,7 +171,6 @@ The Python backend stores app files under:
 
 - Settings: `%LOCALAPPDATA%\\PigeonLabelMaker\\settings.json`
 - Logs: `%LOCALAPPDATA%\\PigeonLabelMaker\\logs\\app.log`
-- Tkinter user presets: `%LOCALAPPDATA%\\PigeonLabelMaker\\user_presets.json`
 
 The Electron UI also stores some local browser-style state such as:
 

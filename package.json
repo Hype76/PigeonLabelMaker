@@ -1,6 +1,6 @@
 {
   "name": "pigeon-label-maker",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "private": true,
   "author": "Pigeon Label Maker",
   "description": "Electron shell for the Pigeon Label Maker Python backend",
@@ -18,13 +18,16 @@
   "build": {
     "appId": "com.pigeon.labelmaker",
     "productName": "Pigeon Label Maker",
+    "electronLanguages": [
+      "en-US",
+      "en-GB"
+    ],
     "directories": {
       "output": "dist"
     },
     "files": [
       "electron/**/*",
       "pigeon_label_maker/**/*",
-      "main.py",
       "requirements.txt",
       "package.json"
     ],

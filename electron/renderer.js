@@ -545,6 +545,26 @@ function cloneCanvasItems(items = state.canvasItems) {
   );
 }
 
+function canvasItemsSignature(items = state.canvasItems) {
+  return JSON.stringify(
+    cloneCanvasItems(items).map((item) => ({
+      type: item.type,
+      text: item.text,
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+      font: item.font,
+      fontSize: item.fontSize,
+      fontWeight: item.fontWeight,
+      textTransform: item.textTransform,
+      rotation: item.rotation,
+      locked: item.locked,
+      imageData: item.imageData ? String(item.imageData).slice(0, 120) : "",
+    }))
+  );
+}
+
 function snapshotCanvasState() {
   return JSON.stringify(cloneCanvasItems());
 }
@@ -651,6 +671,11 @@ function renderSavedDesigns() {
     return;
   }
   elements.savedDesigns.innerHTML = "";
+  if (state.savedDesigns.length === 0) {
+    elements.savedDesigns.classList.add("hidden");
+    return;
+  }
+  elements.savedDesigns.classList.remove("hidden");
   for (const design of state.savedDesigns) {
     const button = document.createElement("button");
     button.type = "button";
@@ -1033,15 +1058,55 @@ async function captureCanvasImage() {
   }
 }
 
-function fitTextToBox(el, item) {
-  let fontSize = item.height * 0.6;
-  el.style.fontSize = `${fontSize}px`;
-
-  while ((el.scrollWidth > item.width || el.scrollHeight > item.height) && fontSize > 5) {
-    fontSize -= 1;
-    el.style.fontSize = `${fontSize}px`;
+function getBestFitFontSize(item) {
+  const text = String(canvasItemText(item) || "").trim() || "Text";
+  const availableWidth = Math.max(1, Number(item.width) - 8);
+  const availableHeight = Math.max(1, Number(item.height) - 8);
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return Math.max(6, Number(item.fontSize) || 50);
   }
 
+  const family = normalizeCanvasFontFamily(item.font || state.settings.font_name)
+    .split(",")[0]
+    .replaceAll("\"", "");
+  const weight = Number(item.fontWeight) >= 700 ? "700" : "400";
+  const lineHeight = 1.05;
+
+  let low = 6;
+  let high = Math.max(
+    24,
+    Number(item.fontSize) || 50,
+    Math.round(availableHeight / lineHeight),
+    Math.round((availableWidth / Math.max(text.length, 1)) * 2.4)
+  );
+  let best = low;
+
+  const fits = (size) => {
+    context.font = `${weight} ${size}px "${family}"`;
+    const measuredWidth = context.measureText(text).width;
+    const measuredHeight = size * lineHeight;
+    return measuredWidth <= availableWidth && measuredHeight <= availableHeight;
+  };
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if (fits(mid)) {
+      best = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  item.fittedFontSize = best;
+  return best;
+}
+
+function fitTextToBox(el, item) {
+  const fontSize = getBestFitFontSize(item);
+  el.style.fontSize = `${fontSize}px`;
   item.fittedFontSize = fontSize;
 }
 
@@ -1421,9 +1486,10 @@ function deleteItem(index) {
 async function saveDesign() {
   localStorage.setItem("design", JSON.stringify(state.canvasItems));
   const thumbnail = await captureCanvasImage();
+  const signature = canvasItemsSignature();
   const design = {
     id: nextCanvasId(),
-    name: `Design ${new Date().toLocaleString("en-GB", {
+    name: `Saved ${new Date().toLocaleString("en-GB", {
       day: "2-digit",
       month: "2-digit",
       hour: "2-digit",
@@ -1431,9 +1497,14 @@ async function saveDesign() {
     })}`,
     thumbnail,
     items: cloneCanvasItems(),
+    signature,
   };
+  const existingIndex = state.savedDesigns.findIndex((item) => item.signature === signature);
+  if (existingIndex >= 0) {
+    state.savedDesigns.splice(existingIndex, 1);
+  }
   state.savedDesigns.unshift(design);
-  state.savedDesigns = state.savedDesigns.slice(0, 12);
+  state.savedDesigns = state.savedDesigns.slice(0, 3);
   localStorage.setItem("saved_designs", JSON.stringify(state.savedDesigns));
   renderSavedDesigns();
 }
@@ -1534,18 +1605,26 @@ function fitSelectedTextToBox() {
   if (!item || item.type !== "text") {
     return;
   }
-  item.fontSize = null;
-  renderCanvasFromState();
-  const selectedEl = elements.designCanvas.querySelector(".canvas-item.selected");
-  if (selectedEl) {
-    fitTextToBox(selectedEl, item);
-    item.fontSize = Math.max(6, Math.round(item.fittedFontSize || 50));
-  }
+  item.fontSize = Math.max(6, getBestFitFontSize(item));
   syncCanvasIntoSettings();
   renderCanvasFromState();
   recordCanvasHistory();
   queueSave();
   triggerPreviewAfterInteraction();
+}
+
+function setPrintPreviewImage(src) {
+  return new Promise((resolve, reject) => {
+    const nextImage = new Image();
+    nextImage.onload = () => {
+      elements.printPreview.src = src;
+      resolve();
+    };
+    nextImage.onerror = () => {
+      reject(new Error("Preview image could not be loaded"));
+    };
+    nextImage.src = src;
+  });
 }
 
 async function exportCurrentDesignPng() {
@@ -2697,11 +2776,6 @@ async function updatePreview(options = {}) {
   }
   const isInlineEditing = state.editingItemIndex !== null && Boolean(state.inlineEditor);
   try {
-    if (!isInlineEditing) {
-      setStatus("Updating...");
-      elements.designCanvas.style.opacity = "0.6";
-      elements.printPreview.style.opacity = "0.6";
-    }
     if (state.editingItemIndex !== null && state.inlineEditor) {
       const editingItem = state.canvasItems[state.editingItemIndex];
       if (editingItem && editingItem.type !== "image") {
@@ -2726,15 +2800,11 @@ async function updatePreview(options = {}) {
       settings: buildRasterRenderSettings(),
       imagePath: imageData,
     });
-    elements.printPreview.src = result.printImage;
-    elements.designCanvas.style.opacity = "1";
-    elements.printPreview.style.opacity = "1";
+    await setPrintPreviewImage(result.printImage);
     if (!isInlineEditing) {
       setStatus("Preview updated");
     }
   } catch (error) {
-    elements.designCanvas.style.opacity = "1";
-    elements.printPreview.style.opacity = "1";
     log(`Preview failed: ${error.message}`);
     if (!isInlineEditing) {
       setStatus("Preview failed");
