@@ -728,7 +728,7 @@ function canvasItemText(item) {
   if (item.type === "barcode") {
     return item.text || "[Barcode]";
   }
-  return item.text || "Text";
+  return item.text || "";
 }
 
 function normalizeInlineEditorText(value) {
@@ -1059,7 +1059,7 @@ async function captureCanvasImage() {
 }
 
 function getBestFitFontSize(item) {
-  const text = String(canvasItemText(item) || "").trim() || "Text";
+  const text = String(canvasItemText(item) || "").replaceAll("\r", "").replaceAll("\n", "");
   const availableWidth = Math.max(1, Number(item.width) - 8);
   const availableHeight = Math.max(1, Number(item.height) - 8);
   const canvas = document.createElement("canvas");
@@ -1073,6 +1073,12 @@ function getBestFitFontSize(item) {
     .replaceAll("\"", "");
   const weight = Number(item.fontWeight) >= 700 ? "700" : "400";
   const lineHeight = 1.05;
+
+  if (!text.trim()) {
+    const emptySize = Math.max(6, Math.floor(availableHeight / lineHeight));
+    item.fittedFontSize = emptySize;
+    return emptySize;
+  }
 
   let low = 6;
   let high = Math.max(
@@ -1102,6 +1108,13 @@ function getBestFitFontSize(item) {
 
   item.fittedFontSize = best;
   return best;
+}
+
+function autoFitTextItem(item) {
+  if (!item || item.type !== "text") {
+    return;
+  }
+  item.fontSize = Math.max(6, getBestFitFontSize(item));
 }
 
 function fitTextToBox(el, item) {
@@ -1365,8 +1378,11 @@ function renderCanvasFromState() {
           }
         }
         item.text = nextText;
+        autoFitTextItem(item);
+        el.style.fontSize = `${Math.max(6, Number(item.fontSize) || 50)}px`;
         if (state.selectedItem === index) {
           elements.layer1Text.value = nextText;
+          elements.fontSizeInput.value = String(Math.max(6, Number(item.fontSize) || 50));
         }
         syncCanvasIntoSettings();
         queueSave();
@@ -1724,6 +1740,7 @@ function closeInlineEditor(options = {}) {
 
   if (!cancel && item) {
     item.text = editorValue ?? item.text;
+    autoFitTextItem(item);
     syncCanvasIntoSettings();
     syncSelectedItemControls();
     recordCanvasHistory();
@@ -1929,6 +1946,9 @@ function applySnapping(item, canvas, el) {
 
 function attachCanvasInteractions() {
   elements.designCanvas.addEventListener("click", () => {
+    if (state.editingItemIndex !== null) {
+      closeInlineEditor();
+    }
     state.selectedItem = null;
     elements.vGuide.classList.add("hidden");
     elements.hGuide.classList.add("hidden");
@@ -3080,6 +3100,13 @@ function attachFormListeners() {
     }
     clearError();
     readFormIntoState();
+    const selectedItem = state.selectedItem !== null ? state.canvasItems[state.selectedItem] : state.canvasItems[0];
+    if (selectedItem?.type === "text") {
+      autoFitTextItem(selectedItem);
+      elements.fontSizeInput.value = String(Math.max(6, Number(selectedItem.fontSize) || 50));
+    }
+    syncCanvasIntoSettings();
+    renderCanvasFromState();
     queueSave();
     clearTimeout(state.previewTimer);
     state.previewTimer = setTimeout(updatePreview, 40);
@@ -3091,6 +3118,13 @@ function attachFormListeners() {
       }
       clearError();
       readFormIntoState();
+      const selectedItem = state.selectedItem !== null ? state.canvasItems[state.selectedItem] : state.canvasItems[0];
+      if (selectedItem?.type === "text") {
+        autoFitTextItem(selectedItem);
+        elements.fontSizeInput.value = String(Math.max(6, Number(selectedItem.fontSize) || 50));
+      }
+      syncCanvasIntoSettings();
+      renderCanvasFromState();
       recordCanvasHistory();
       queueSave();
       queuePreview();
