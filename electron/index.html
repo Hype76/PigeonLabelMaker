@@ -50,7 +50,7 @@
           <div class="section-body">
             <label class="field">
               <span>YOUR TEXT</span>
-              <input id="layer1Text" type="text" placeholder="Edit selected item" />
+              <textarea id="layer1Text" rows="3" placeholder="Edit selected item"></textarea>
             </label>
             <div class="field top-gap">
               <span>Symbols</span>
@@ -275,10 +275,6 @@
               </div>
               <div id="printProgress" class="print-progress hidden"></div>
             </div>
-            <button id="testPrintButton" class="ghost">
-              Test Print
-            </button>
-
             <button id="stopPrintButton" class="ghost" disabled>
               Stop
             </button>
@@ -341,11 +337,6 @@
               <p id="deviceConnectionDetail" class="connection-detail">No printer connected</p>
               <span id="connectionTestBadge" class="status-pill muted">Not tested</span>
               <div id="errorBar" class="error-bar connection-error hidden"></div>
-              <div id="batteryPanel" class="battery-panel hidden">
-                <span class="battery-label">Battery</span>
-                <div id="batteryMeter" class="battery-meter" aria-label="Battery level"></div>
-                <span id="batteryText" class="battery-text">--%</span>
-              </div>
             </div>
             <div class="panel-head top-gap">
               <h2>BLE</h2>
@@ -390,7 +381,6 @@
 
         <h3>Tips</h3>
         <ul>
-          <li>Use Test Print to check connection</li>
           <li>Use Recent labels to reuse text</li>
           <li>Preview shows exact output</li>
         </ul>

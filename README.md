@@ -10,7 +10,6 @@ Pigeon Label Maker is a Windows label design and thermal printing app for small 
 - COM and BLE printer support
 - Live processed print preview generated from the design canvas
 - Custom label sizes plus quick size presets
-- Test print action
 - Local recent label history
 - Save and load design layout in the Electron UI
 - Undo, redo, duplicate, lock, layer order, and keyboard nudge tools
@@ -130,9 +129,8 @@ python -m pigeon_label_maker.backend_service
 4. Move and resize elements on the canvas.
 5. Adjust image processing settings if you are printing artwork or photos.
 6. Select a COM port and click `Connect COM`, or scan and connect over BLE.
-7. Use `Test Print` if you want to confirm the connection first.
-8. Set copies if needed and use `Stop` to stop the remaining queue after the current label.
-9. Click `Print Label`.
+7. Set copies if needed and use `Stop` to stop the remaining queue after the current label.
+8. Click `Print Label`.
 
 ## Keyboard Shortcuts
 
@@ -217,7 +215,6 @@ Expected outputs:
 
 - confirm the correct COM port or BLE device is selected
 - for COM, click `Connect COM` first
-- use `Test Print` first
 - verify the printer accepts TSPL commands
 
 ### Fonts in print output look wrong

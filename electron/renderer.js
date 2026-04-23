@@ -10,7 +10,6 @@ const state = {
   bleWritable: [],
   bleNotify: [],
   bleState: { connected: false, address: "", name: "" },
-  batteryLevel: null,
   comConnected: false,
   comConnecting: false,
   isHydrating: false,
@@ -1119,6 +1118,15 @@ function autoFitTextItem(item) {
   item.fontSize = Math.max(6, getBestFitFontSize(item));
 }
 
+function updateLiveTextElementSize(el, item) {
+  if (!el || !item || item.type !== "text") {
+    return;
+  }
+  autoFitTextItem(item);
+  const target = el.querySelector(".canvas-inline-editor") || el;
+  target.style.fontSize = `${Math.max(6, Number(item.fontSize) || 50)}px`;
+}
+
 function fitTextToBox(el, item) {
   const fontSize = getBestFitFontSize(item);
   el.style.fontSize = `${fontSize}px`;
@@ -1357,31 +1365,28 @@ function renderCanvasFromState() {
 
     if (state.editingItemIndex === index && item.type !== "image") {
       el.classList.add("editing");
-      el.contentEditable = "true";
-      el.spellcheck = false;
-      el.innerText = item.text || "";
-      el.addEventListener("mousedown", (e) => {
+      el.innerHTML = "";
+      const editor = document.createElement("textarea");
+      editor.className = "canvas-inline-editor";
+      editor.spellcheck = false;
+      editor.value = item.text || "";
+      editor.addEventListener("mousedown", (e) => {
         e.stopPropagation();
       });
-      el.addEventListener("click", (e) => {
+      editor.addEventListener("click", (e) => {
         e.stopPropagation();
       });
-      el.addEventListener("input", () => {
-        const nextText = normalizeInlineEditorText(el.innerText);
-        if (el.innerText !== nextText) {
-          el.innerText = nextText;
-          const selection = window.getSelection();
-          if (selection) {
-            const range = document.createRange();
-            range.selectNodeContents(el);
-            range.collapse(false);
-            selection.removeAllRanges();
-            selection.addRange(range);
-          }
+      editor.addEventListener("input", () => {
+        const nextText = normalizeInlineEditorText(editor.value);
+        if (editor.value !== nextText) {
+          const selectionStart = editor.selectionStart;
+          const selectionEnd = editor.selectionEnd;
+          editor.value = nextText;
+          editor.setSelectionRange(selectionStart, selectionEnd);
         }
         item.text = nextText;
         autoFitTextItem(item);
-        el.style.fontSize = `${Math.max(6, Number(item.fontSize) || 50)}px`;
+        editor.style.fontSize = `${Math.max(6, Number(item.fontSize) || 50)}px`;
         if (state.selectedItem === index) {
           elements.layer1Text.value = nextText;
           elements.fontSizeInput.value = String(Math.max(6, Number(item.fontSize) || 50));
@@ -1390,16 +1395,13 @@ function renderCanvasFromState() {
         queueSave();
         queuePreview();
       });
-      el.addEventListener("keydown", (e) => {
+      editor.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
           e.preventDefault();
           closeInlineEditor({ cancel: true });
           return;
         }
         if (e.key === "Enter" && e.shiftKey) {
-          e.preventDefault();
-          insertTextAtSelection("\n");
-          el.dispatchEvent(new Event("input", { bubbles: true }));
           return;
         }
         if (e.key === "Enter" && !e.shiftKey) {
@@ -1407,10 +1409,15 @@ function renderCanvasFromState() {
           closeInlineEditor();
         }
       });
-      el.addEventListener("blur", () => {
+      editor.addEventListener("blur", () => {
         closeInlineEditor();
       });
-      state.inlineEditor = el;
+      editor.style.fontFamily = normalizeCanvasFontFamily(item.font || state.settings.font_name);
+      editor.style.fontWeight = String(Number(item.fontWeight) || 400);
+      editor.style.textTransform = item.textTransform || "none";
+      editor.style.fontSize = `${Math.max(6, Number(item.fontSize) || 50)}px`;
+      el.appendChild(editor);
+      state.inlineEditor = editor;
     }
 
     if (index === state.selectedItem) {
@@ -1482,13 +1489,9 @@ function renderCanvasFromState() {
   syncSelectedItemControls();
   if (state.inlineEditor) {
     state.inlineEditor.focus();
-    const selection = window.getSelection();
-    if (selection) {
-      const range = document.createRange();
-      range.selectNodeContents(state.inlineEditor);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
+    if ("selectionStart" in state.inlineEditor) {
+      const end = state.inlineEditor.value.length;
+      state.inlineEditor.setSelectionRange(end, end);
     }
   }
 }
@@ -1742,7 +1745,11 @@ function closeInlineEditor(options = {}) {
   }
 
   const item = state.canvasItems[index];
-  const editorValue = normalizeInlineEditorText(state.inlineEditor?.innerText);
+  const rawEditorValue =
+    state.inlineEditor && "value" in state.inlineEditor
+      ? state.inlineEditor.value
+      : state.inlineEditor?.innerText;
+  const editorValue = normalizeInlineEditorText(rawEditorValue);
   state.editingItemIndex = null;
   state.inlineEditor = null;
 
@@ -1994,6 +2001,12 @@ function attachCanvasInteractions() {
       state.dragContext.item._tempHeight = clampedHeight;
       state.dragContext.el.style.width = `${clampedWidth}px`;
       state.dragContext.el.style.height = `${clampedHeight}px`;
+      state.dragContext.item.width = clampedWidth;
+      state.dragContext.item.height = clampedHeight;
+      updateLiveTextElementSize(state.dragContext.el, state.dragContext.item);
+      if (state.selectedItem === state.dragContext.index && state.dragContext.item.type === "text") {
+        elements.fontSizeInput.value = String(Math.max(6, Number(state.dragContext.item.fontSize) || 50));
+      }
     } else if (state.dragContext.mode === "rotate") {
       const elRect = state.dragContext.el.getBoundingClientRect();
       const cx = elRect.left + elRect.width / 2;
@@ -2241,9 +2254,6 @@ function initElements() {
     deviceConnectionBadge: $("deviceConnectionBadge"),
     deviceConnectionDetail: $("deviceConnectionDetail"),
     connectionTestBadge: $("connectionTestBadge"),
-    batteryPanel: $("batteryPanel"),
-    batteryMeter: $("batteryMeter"),
-    batteryText: $("batteryText"),
     printProgress: $("printProgress"),
     errorBar: $("errorBar"),
     themeToggle: $("themeToggle"),
@@ -2301,7 +2311,6 @@ function initElements() {
     scanBleButton: $("scanBleButton"),
     connectBleButton: $("connectBleButton"),
     disconnectBleButton: $("disconnectBleButton"),
-    testPrintButton: $("testPrintButton"),
     stopPrintButton: $("stopPrintButton"),
     printButton: $("printButton"),
     designCanvasViewport: $("designCanvasViewport"),
@@ -2333,7 +2342,6 @@ function setBusy(busy, text) {
     elements.scanBleButton,
     elements.connectBleButton,
     elements.disconnectBleButton,
-    elements.testPrintButton,
     elements.printButton,
   ];
   for (const control of controls) {
@@ -2415,74 +2423,6 @@ function updateConnectionUI() {
   }
 }
 
-function updateBatteryUI() {
-  const level = Number(state.batteryLevel);
-  const showBattery = state.settings?.output_mode === "BLE" && state.bleState.connected;
-  const hasBattery = showBattery && Number.isFinite(level) && level > 0;
-
-  if (!showBattery) {
-    elements.batteryPanel.classList.add("hidden");
-    elements.batteryMeter.innerHTML = "";
-    elements.batteryText.textContent = "--%";
-    return;
-  }
-
-  if (!hasBattery) {
-    elements.batteryPanel.classList.remove("hidden");
-    elements.batteryMeter.innerHTML = "";
-    for (let index = 0; index < 5; index += 1) {
-      const block = document.createElement("span");
-      block.className = "battery-block";
-      elements.batteryMeter.appendChild(block);
-    }
-    elements.batteryText.textContent = "Unknown";
-    return;
-  }
-
-  const clamped = Math.max(0, Math.min(100, Math.round(level)));
-  const filledBlocks = Math.max(1, Math.ceil(clamped / 20));
-  elements.batteryPanel.classList.remove("hidden");
-  elements.batteryMeter.innerHTML = "";
-
-  for (let index = 0; index < 5; index += 1) {
-    const block = document.createElement("span");
-    block.className = "battery-block";
-    if (index < filledBlocks) {
-      block.classList.add("active");
-      if (clamped <= 20) {
-        block.classList.add("low");
-      } else if (clamped <= 40) {
-        block.classList.add("warn");
-      }
-    }
-    elements.batteryMeter.appendChild(block);
-  }
-
-  elements.batteryText.textContent = `${clamped}%`;
-}
-
-async function refreshBleBattery() {
-  const address = state.bleState.address || state.settings.ble_device_address;
-  if (!state.bleState.connected || !address) {
-    state.batteryLevel = null;
-    updateBatteryUI();
-    return;
-  }
-
-  try {
-    const result = await safeRequest("bleBattery", {
-      address,
-      pair: false,
-      characteristicUuid: state.settings.ble_write_char_uuid || "",
-    });
-    state.batteryLevel = Number.isFinite(Number(result.battery)) ? Number(result.battery) : null;
-  } catch (_error) {
-    state.batteryLevel = null;
-  }
-
-  updateBatteryUI();
-}
-
 function startConnectionTimer() {
   state.connectionStartTime = Date.now();
 
@@ -2537,8 +2477,6 @@ async function runComConnect() {
     state.settings.output_mode = "Printer";
     state.comConnecting = false;
     state.comConnected = true;
-    state.batteryLevel = null;
-    updateBatteryUI();
     updateConnectionTestBadge("idle");
       startConnectionTimer();
       queueSave();
@@ -2547,8 +2485,6 @@ async function runComConnect() {
   } catch (error) {
     state.comConnecting = false;
     state.comConnected = false;
-    state.batteryLevel = null;
-    updateBatteryUI();
       updateConnectionTestBadge("fail");
       stopConnectionTimer();
       updateConnectionUI();
@@ -2632,7 +2568,6 @@ function syncForm() {
     refreshBleStatus();
     updateConnectionUI();
     updateConnectionTestBadge();
-    updateBatteryUI();
     updateCanvasSurface();
   updatePrintPreviewOrientation();
   buildCanvasItemsFromSettings();
@@ -2798,6 +2733,13 @@ function triggerPreviewAfterInteraction() {
   }, 100);
 }
 
+function getPrintQueueDelayMs() {
+  if (state.settings?.output_mode === "BLE") {
+    return 450;
+  }
+  return 650;
+}
+
 async function updatePreview(options = {}) {
   const { force = false } = options;
   if (state.busy && !force) {
@@ -2873,28 +2815,6 @@ async function refreshBleState() {
   state.bleState = result.state;
   refreshBleStatus();
   updateConnectionUI();
-  await refreshBleBattery();
-}
-
-async function runTestPrint() {
-  try {
-    clearError();
-    readFormIntoState();
-    setBusy(true, "Sending test print");
-
-    await safeRequest("testPrint", {
-      settings: state.settings,
-    });
-
-    log("Test print sent");
-    updateConnectionTestBadge("pass");
-    setStatus("Test print complete");
-  } catch (error) {
-    updateConnectionTestBadge("fail");
-    showError(error.message);
-  } finally {
-    setBusy(false);
-  }
 }
 
 async function runPrint() {
@@ -2927,6 +2847,9 @@ async function runPrint() {
         imagePath: imageData,
       });
       updatePrintProgress(i, total);
+      if (i < total && !state.printStopRequested) {
+        await new Promise((resolve) => setTimeout(resolve, getPrintQueueDelayMs()));
+      }
     }
 
     if (lastResult) {
@@ -3027,7 +2950,6 @@ async function runBleConnect(options = {}) {
     syncForm();
     updateConnectionUI();
     startConnectionTimer();
-    await refreshBleBattery();
     updateConnectionTestBadge("idle");
     queueSave();
     queuePreview();
@@ -3055,8 +2977,6 @@ async function runBleDisconnect() {
       state.bleState = result.state;
       state.bleWritable = [];
       state.bleNotify = [];
-      state.batteryLevel = null;
-      updateBatteryUI();
       updateConnectionTestBadge("idle");
       state.settings.ble_write_char_uuid = "";
       state.settings.output_mode = "Printer";
@@ -3282,7 +3202,6 @@ function attachFormListeners() {
   elements.scanBleButton.addEventListener("click", runBleScan);
   elements.connectBleButton.addEventListener("click", runBleConnect);
   elements.disconnectBleButton.addEventListener("click", runBleDisconnect);
-  elements.testPrintButton.addEventListener("click", runTestPrint);
   elements.stopPrintButton.addEventListener("click", requestStopPrintQueue);
   elements.printButton.addEventListener("click", runPrint);
 
