@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from dataclasses import asdict, is_dataclass
 from io import BytesIO
@@ -184,14 +185,91 @@ async def get_ble_battery_async(address: str, pair: bool = False) -> int | None:
     return None
 
 
+def parse_battery_from_bytes(data: bytes) -> int | None:
+    if not data:
+        return None
+
+    for encoding in ("utf-8", "latin-1"):
+        try:
+            text = data.decode(encoding, errors="ignore")
+        except Exception:
+            continue
+        for token in text.replace("%", " ").replace(":", " ").split():
+            digits = "".join(char for char in token if char.isdigit())
+            if not digits:
+                continue
+            level = int(digits)
+            if 1 <= level <= 100:
+                return level
+    return None
+
+
+async def get_ble_battery_from_printer_async(
+    address: str,
+    characteristic_uuid: str = "",
+    pair: bool = False,
+) -> int | None:
+    try:
+        from .printing import (
+            _ble_notification_buffer,
+            configure_ble_notifications_async,
+            ensure_ble_connection_async,
+            extract_writable_characteristics,
+            find_characteristic,
+        )
+
+        client = await ensure_ble_connection_async(address=address, pair=pair)
+        target_uuid = str(characteristic_uuid or "").strip().lower()
+        if not target_uuid:
+            for candidate in extract_writable_characteristics(client):
+                if candidate.preferred:
+                    target_uuid = candidate.uuid
+                    break
+            if not target_uuid:
+                writable = extract_writable_characteristics(client)
+                target_uuid = writable[0].uuid if writable else ""
+        if not target_uuid:
+            return None
+
+        target_characteristic = find_characteristic(client, target_uuid)
+        if target_characteristic is None:
+            return None
+
+        await configure_ble_notifications_async(client, target_uuid)
+        _ble_notification_buffer.clear()
+        await client.write_gatt_char(target_characteristic, b"BATTERY?\r\n", response=True)
+        await asyncio.sleep(0.6)
+
+        for packet_hex in list(_ble_notification_buffer):
+            try:
+                level = parse_battery_from_bytes(bytes.fromhex(packet_hex))
+            except Exception:
+                level = None
+            if level is not None:
+                return level
+    except Exception:
+        return None
+
+    return None
+
+
 def command_ble_battery(params: dict[str, Any]) -> dict[str, Any]:
     address = str(params.get("address", "")).strip()
+    characteristic_uuid = str(params.get("characteristicUuid", "")).strip()
     pair = bool(params.get("pair", False))
 
     if not address:
         return {"battery": None}
 
     level = run_ble_coro_in_worker(get_ble_battery_async(address, pair))
+    if level is None:
+        level = run_ble_coro_in_worker(
+            get_ble_battery_from_printer_async(
+                address=address,
+                characteristic_uuid=characteristic_uuid,
+                pair=pair,
+            )
+        )
     return {"battery": level if level and 1 <= int(level) <= 100 else None}
 
 

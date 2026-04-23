@@ -733,8 +733,8 @@ function canvasItemText(item) {
 
 function normalizeInlineEditorText(value) {
   return String(value || "")
-    .replaceAll("\r", "")
-    .replaceAll("\n", "");
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n");
 }
 
 function insertTextAtSelection(text) {
@@ -1059,7 +1059,7 @@ async function captureCanvasImage() {
 }
 
 function getBestFitFontSize(item) {
-  const text = String(canvasItemText(item) || "").replaceAll("\r", "").replaceAll("\n", "");
+  const text = String(canvasItemText(item) || "").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   const availableWidth = Math.max(1, Number(item.width) - 8);
   const availableHeight = Math.max(1, Number(item.height) - 8);
   const canvas = document.createElement("canvas");
@@ -1073,6 +1073,8 @@ function getBestFitFontSize(item) {
     .replaceAll("\"", "");
   const weight = Number(item.fontWeight) >= 700 ? "700" : "400";
   const lineHeight = 1.05;
+  const lines = text.split("\n");
+  const longestLine = lines.reduce((longest, line) => (line.length > longest.length ? line : longest), "");
 
   if (!text.trim()) {
     const emptySize = Math.max(6, Math.floor(availableHeight / lineHeight));
@@ -1084,15 +1086,15 @@ function getBestFitFontSize(item) {
   let high = Math.max(
     24,
     Number(item.fontSize) || 50,
-    Math.round(availableHeight / lineHeight),
-    Math.round((availableWidth / Math.max(text.length, 1)) * 2.4)
+    Math.round(availableHeight / Math.max(lines.length, 1) / lineHeight),
+    Math.round((availableWidth / Math.max(longestLine.length, 1)) * 2.4)
   );
   let best = low;
 
   const fits = (size) => {
     context.font = `${weight} ${size}px "${family}"`;
-    const measuredWidth = context.measureText(text).width;
-    const measuredHeight = size * lineHeight;
+    const measuredWidth = lines.reduce((width, line) => Math.max(width, context.measureText(line || " ").width), 0);
+    const measuredHeight = size * lineHeight * Math.max(lines.length, 1);
     return measuredWidth <= availableWidth && measuredHeight <= availableHeight;
   };
 
@@ -1392,6 +1394,12 @@ function renderCanvasFromState() {
         if (e.key === "Escape") {
           e.preventDefault();
           closeInlineEditor({ cancel: true });
+          return;
+        }
+        if (e.key === "Enter" && e.shiftKey) {
+          e.preventDefault();
+          insertTextAtSelection("\n");
+          el.dispatchEvent(new Event("input", { bubbles: true }));
           return;
         }
         if (e.key === "Enter" && !e.shiftKey) {
@@ -2465,6 +2473,7 @@ async function refreshBleBattery() {
     const result = await safeRequest("bleBattery", {
       address,
       pair: false,
+      characteristicUuid: state.settings.ble_write_char_uuid || "",
     });
     state.batteryLevel = Number.isFinite(Number(result.battery)) ? Number(result.battery) : null;
   } catch (_error) {
