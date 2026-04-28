@@ -150,6 +150,12 @@ _ble_notification_buffer: list[str] = []
 _serial_connection: serial.Serial | None = None
 _serial_connection_port: str = ""
 _serial_connection_baud_rate: int = 0
+_winrt_ble_device: Any = None
+_winrt_ble_address: str = ""
+_winrt_ble_write_uuid: str = ""
+_winrt_ble_write_char: Any = None
+_winrt_ble_notify_char: Any = None
+_winrt_ble_notify_uuid: str = ""
 
 KNOWN_PRINTER_WRITE_UUIDS = (
     "0000ff02-0000-1000-8000-00805f9b34fb",
@@ -198,6 +204,24 @@ def print_pixel_size(settings: AppSettings) -> tuple[int, int]:
     return height_px, width_px
 
 
+def apply_print_calibration(image: Image.Image, settings: AppSettings, size: tuple[int, int]) -> Image.Image:
+    target_width, target_height = size
+    scale = max(0.5, min(1.5, float(getattr(settings, "print_scale", 1.0) or 1.0)))
+    offset_x = mm_to_pixels(float(getattr(settings, "print_offset_x_mm", 0.0) or 0.0), settings.print_dpi)
+    offset_y = mm_to_pixels(float(getattr(settings, "print_offset_y_mm", 0.0) or 0.0), settings.print_dpi)
+
+    scaled_width = max(1, round(target_width * scale))
+    scaled_height = max(1, round(target_height * scale))
+    scaled = image.resize((scaled_width, scaled_height), RESAMPLE)
+
+    fill = image.getpixel((0, 0)) if image.width and image.height else 255
+    calibrated = Image.new("L", (target_width, target_height), fill)
+    paste_x = round((target_width - scaled_width) / 2 + offset_x)
+    paste_y = round((target_height - scaled_height) / 2 + offset_y)
+    calibrated.paste(scaled, (paste_x, paste_y))
+    return calibrated
+
+
 def apply_print_processing(image: Image.Image, settings: AppSettings) -> Image.Image:
     image = image.convert("RGB")
     grayscale = ImageOps.grayscale(image)
@@ -207,7 +231,9 @@ def apply_print_processing(image: Image.Image, settings: AppSettings) -> Image.I
         grayscale = ImageOps.invert(grayscale)
 
     width_px, height_px = print_pixel_size(settings)
-    grayscale = grayscale.resize((height_px, width_px), RESAMPLE)
+    target_size = (height_px, width_px)
+    grayscale = grayscale.resize(target_size, RESAMPLE)
+    grayscale = apply_print_calibration(grayscale, settings, target_size)
 
     if settings.image_mode == "dither":
         thresholded = grayscale.convert("1")
@@ -238,6 +264,12 @@ def validate_settings(settings: AppSettings) -> list[str]:
         errors.append("Copies must be between 1 and 50.")
     if settings.density < 1 or settings.density > 15:
         errors.append("Density must be between 1 and 15.")
+    if settings.print_scale < 0.5 or settings.print_scale > 1.5:
+        errors.append("Print scale must be between 0.5 and 1.5.")
+    if settings.print_offset_x_mm < -30 or settings.print_offset_x_mm > 30:
+        errors.append("Print X offset must be between -30 mm and 30 mm.")
+    if settings.print_offset_y_mm < -30 or settings.print_offset_y_mm > 30:
+        errors.append("Print Y offset must be between -30 mm and 30 mm.")
     if settings.threshold < 0 or settings.threshold > 255:
         errors.append("Threshold must be between 0 and 255.")
     if settings.output_mode == "Printer" and not settings.port.strip():
@@ -384,6 +416,24 @@ def disconnect_serial() -> None:
             _serial_connection = None
             _serial_connection_port = ""
             _serial_connection_baud_rate = 0
+
+
+def close_winrt_ble_device() -> None:
+    global _winrt_ble_address, _winrt_ble_device, _winrt_ble_notify_char
+    global _winrt_ble_notify_uuid, _winrt_ble_write_char, _winrt_ble_write_uuid
+
+    if _winrt_ble_device is not None:
+        try:
+            close_device = getattr(_winrt_ble_device, "close", None)
+            if callable(close_device):
+                close_device()
+        finally:
+            _winrt_ble_device = None
+            _winrt_ble_address = ""
+            _winrt_ble_write_uuid = ""
+            _winrt_ble_write_char = None
+            _winrt_ble_notify_char = None
+            _winrt_ble_notify_uuid = ""
 
 
 async def discover_ble_devices_async(timeout: float = 5.0) -> list[BLEDiscoveredDevice]:
@@ -741,12 +791,34 @@ async def find_winrt_ble_characteristics_async(
     characteristic_uuid: str,
     notify_uuid: str,
 ) -> tuple[Any, Any, Any, str]:
+    global _winrt_ble_address, _winrt_ble_device, _winrt_ble_notify_char
+    global _winrt_ble_notify_uuid, _winrt_ble_write_char, _winrt_ble_write_uuid
+
     if (
         BluetoothLEDevice is None
         or BluetoothCacheMode is None
         or GattCommunicationStatus is None
     ):
         raise RuntimeError("Native WinRT BLE support is unavailable.")
+
+    normalized_address = address.strip().lower()
+    normalized_characteristic_uuid = normalize_uuid_text(characteristic_uuid)
+    normalized_notify_uuid = normalize_uuid_text(notify_uuid) if notify_uuid else ""
+
+    if (
+        _winrt_ble_device is not None
+        and _winrt_ble_address == normalized_address
+        and _winrt_ble_write_uuid == normalized_characteristic_uuid
+        and _winrt_ble_write_char is not None
+    ):
+        return (
+            _winrt_ble_device,
+            _winrt_ble_write_char,
+            _winrt_ble_notify_char,
+            _winrt_ble_notify_uuid,
+        )
+
+    close_winrt_ble_device()
 
     device = await BluetoothLEDevice.from_bluetooth_address_async(mac_address_to_int(address))
     if device is None:
@@ -767,9 +839,9 @@ async def find_winrt_ble_characteristics_async(
                 current_uuid = normalize_uuid_text(characteristic.uuid)
                 handle = int(getattr(characteristic, "attribute_handle", 0) or 0)
                 discovered_characteristics.append(f"{current_uuid}@0x{handle:04x}")
-                if current_uuid == characteristic_uuid:
+                if current_uuid == normalized_characteristic_uuid:
                     write_char = characteristic
-                if notify_uuid and current_uuid == notify_uuid:
+                if normalized_notify_uuid and current_uuid == normalized_notify_uuid:
                     notify_char = characteristic
         if write_char is not None:
             break
@@ -784,7 +856,14 @@ async def find_winrt_ble_characteristics_async(
             f"Discovered: {discovered}"
         )
 
-    return device, write_char, notify_char, notify_uuid
+    _winrt_ble_device = device
+    _winrt_ble_address = normalized_address
+    _winrt_ble_write_uuid = normalized_characteristic_uuid
+    _winrt_ble_write_char = write_char
+    _winrt_ble_notify_char = notify_char
+    _winrt_ble_notify_uuid = normalized_notify_uuid
+
+    return device, write_char, notify_char, normalized_notify_uuid
 
 
 async def send_winrt_payload_sequence_async(
@@ -802,10 +881,17 @@ async def send_winrt_payload_sequence_async(
     ):
         raise RuntimeError("Native WinRT BLE support is unavailable.")
 
-    await disconnect_ble_async(clear_session=False)
     address = settings.ble_device_address.strip()
     normalized_characteristic_uuid = normalize_uuid_text(characteristic_uuid)
     notify_uuid = KNOWN_PRINTER_NOTIFY_UUIDS.get(normalized_characteristic_uuid, "")
+
+    if (
+        _winrt_ble_device is None
+        or _winrt_ble_address != address.lower()
+        or _winrt_ble_write_uuid != normalized_characteristic_uuid
+    ):
+        await disconnect_ble_async(clear_session=False)
+
     device, write_char, notify_char, notify_uuid = await find_winrt_ble_characteristics_async(
         address=address,
         characteristic_uuid=normalized_characteristic_uuid,
@@ -821,6 +907,7 @@ async def send_winrt_payload_sequence_async(
             pass
 
     notify_token = None
+    operation_failed = False
     try:
         if notify_char is not None:
             notify_token = notify_char.add_value_changed(on_value_changed)
@@ -862,6 +949,9 @@ async def send_winrt_payload_sequence_async(
             first_data_packet_hex=packet_hexes[first_data_index] if len(packet_hexes) > first_data_index else "",
             last_packet_hex=packet_hexes[-1] if packet_hexes else "",
         )
+    except Exception:
+        operation_failed = True
+        raise
     finally:
         if notify_char is not None:
             try:
@@ -875,9 +965,8 @@ async def send_winrt_payload_sequence_async(
                 notify_char.remove_value_changed(notify_token)
             except Exception:
                 pass
-        close_device = getattr(device, "close", None)
-        if callable(close_device):
-            close_device()
+        if operation_failed:
+            close_winrt_ble_device()
 
 
 
@@ -936,6 +1025,8 @@ async def connect_ble_async(address: str, pair: bool = False) -> BLEConnectionSt
 async def disconnect_ble_async(clear_session: bool = True) -> None:
     global _ble_active_notify_uuid, _ble_connected_address, _ble_connected_client, _ble_connected_name
     global _ble_session_address, _ble_session_name
+
+    close_winrt_ble_device()
 
     if _ble_connected_client is not None:
         try:

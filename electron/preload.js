@@ -49,6 +49,23 @@ contextBridge.exposeInMainWorld("pigeonApi", {
   choosePngPath() {
     return ipcRenderer.invoke("dialog:save-png");
   },
+  getAppVersion() {
+    return ipcRenderer.invoke("app:version");
+  },
+  checkForUpdates() {
+    return ipcRenderer.invoke("update:check");
+  },
+  downloadUpdate() {
+    return ipcRenderer.invoke("update:download");
+  },
+  installUpdate() {
+    return ipcRenderer.invoke("update:install");
+  },
+  onUpdateStatus(callback) {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on("update:status", handler);
+    return () => ipcRenderer.removeListener("update:status", handler);
+  },
   renderQrSvg(text) {
     return renderQrSvg(text);
   },

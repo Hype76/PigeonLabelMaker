@@ -1,9 +1,11 @@
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { spawn } = require("child_process");
 const path = require("path");
 const readline = require("readline");
 
 const APP_NAME = "Pigeon Label Maker";
+let mainWindow = null;
 
 class BackendClient {
   constructor() {
@@ -105,8 +107,12 @@ class BackendClient {
 
 const backend = new BackendClient();
 
+function appTitle() {
+  return `${APP_NAME} v${app.getVersion()}`;
+}
+
 function createWindow() {
-  const window = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1500,
     height: 960,
     minWidth: 1180,
@@ -121,9 +127,78 @@ function createWindow() {
     },
   });
 
-  window.removeMenu();
-  window.setTitle(APP_NAME);
-  window.loadFile(path.join(__dirname, "index.html"));
+  mainWindow.removeMenu();
+  mainWindow.setTitle(appTitle());
+  mainWindow.loadFile(path.join(__dirname, "index.html"));
+}
+
+function sendUpdateStatus(payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  mainWindow.webContents.send("update:status", payload);
+}
+
+function formatUpdateError(error) {
+  const message = String(error?.message || error || "");
+
+  if (message.includes("No published versions on GitHub")) {
+    return "No update release published yet";
+  }
+
+  if (message.includes("Cannot find channel")) {
+    return "Update metadata is missing from the release";
+  }
+
+  if (message.includes("net::ERR_INTERNET_DISCONNECTED")) {
+    return "No internet connection";
+  }
+
+  return message || "Update check failed";
+}
+
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("checking-for-update", () => {
+    sendUpdateStatus({ status: "checking", message: "Checking for updates..." });
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    sendUpdateStatus({
+      status: "available",
+      version: info.version,
+      message: `Update ${info.version} available`,
+    });
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    sendUpdateStatus({ status: "none", message: "App is up to date" });
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    sendUpdateStatus({
+      status: "downloading",
+      percent: Math.round(progress.percent || 0),
+      message: `Downloading update ${Math.round(progress.percent || 0)}%`,
+    });
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    sendUpdateStatus({
+      status: "downloaded",
+      version: info.version,
+      message: `Update ${info.version} ready to install`,
+    });
+  });
+
+  autoUpdater.on("error", (error) => {
+    sendUpdateStatus({
+      status: "error",
+      message: formatUpdateError(error),
+    });
+  });
 }
 
 ipcMain.handle("backend:request", async (_event, command, params) => {
@@ -151,10 +226,67 @@ ipcMain.handle("dialog:save-png", async () => {
   return result.canceled ? null : result.filePath;
 });
 
+ipcMain.handle("app:version", async () => {
+  return app.getVersion();
+});
+
+ipcMain.handle("update:check", async () => {
+  if (!app.isPackaged) {
+    const result = { status: "dev", message: "Updates work in the installed app only" };
+    sendUpdateStatus(result);
+    return result;
+  }
+  try {
+    await autoUpdater.checkForUpdates();
+    return { status: "checking", message: "Checking for updates..." };
+  } catch (error) {
+    const result = { status: "error", message: formatUpdateError(error) };
+    sendUpdateStatus(result);
+    return result;
+  }
+});
+
+ipcMain.handle("update:download", async () => {
+  if (!app.isPackaged) {
+    const result = { status: "dev", message: "Updates work in the installed app only" };
+    sendUpdateStatus(result);
+    return result;
+  }
+  try {
+    await autoUpdater.downloadUpdate();
+    return { status: "downloading", message: "Downloading update..." };
+  } catch (error) {
+    const result = { status: "error", message: formatUpdateError(error) };
+    sendUpdateStatus(result);
+    return result;
+  }
+});
+
+ipcMain.handle("update:install", async () => {
+  if (!app.isPackaged) {
+    const result = { status: "dev", message: "Updates work in the installed app only" };
+    sendUpdateStatus(result);
+    return result;
+  }
+  autoUpdater.quitAndInstall(false, true);
+  return { status: "installing", message: "Installing update..." };
+});
+
 app.setName(APP_NAME);
+setupAutoUpdater();
 
 app.whenReady().then(() => {
   createWindow();
+  if (app.isPackaged) {
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch((error) => {
+        sendUpdateStatus({
+          status: "error",
+          message: formatUpdateError(error),
+        });
+      });
+    }, 4000);
+  }
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();

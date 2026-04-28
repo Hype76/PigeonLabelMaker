@@ -20,6 +20,9 @@
               <button id="themeToggle" class="ghost small">Toggle Theme</button>
               <button id="modeToggle" class="ghost small">Advanced</button>
               <button id="helpButton" class="ghost small">Help</button>
+              <button id="checkUpdatesButton" class="ghost small">Check Updates</button>
+              <button id="downloadUpdateButton" class="ghost small hidden">Download</button>
+              <button id="installUpdateButton" class="ghost small hidden">Install</button>
             </div>
             <p class="eyebrow">Electron Studio</p>
             <h1>Pigeon Label Maker</h1>
@@ -29,6 +32,7 @@
               <span id="appStatus" class="status-pill">Starting</span>
               <span id="bleStatus" class="status-pill muted">BLE disconnected</span>
             </div>
+            <p id="updateStatus" class="update-status">Updates: not checked</p>
           </div>
         </div>
 
@@ -224,6 +228,26 @@
           </div>
         </section>
 
+        <section class="panel sidebar-section" data-section-id="profiles">
+          <button class="panel-head section-toggle" type="button" aria-expanded="true">
+            <h2>Profiles</h2>
+            <span class="section-chevron" aria-hidden="true"></span>
+          </button>
+
+          <div class="section-body">
+            <label class="field">
+              <span>Printer Profile</span>
+              <select id="printerProfileSelect"></select>
+            </label>
+            <div class="grid two top-gap">
+              <button id="applyPrinterProfileButton" class="ghost" type="button">Apply</button>
+              <button id="savePrinterProfileButton" class="ghost" type="button">Save</button>
+            </div>
+            <button id="deletePrinterProfileButton" class="ghost top-gap" type="button">Delete Profile</button>
+            <p class="hint">Profiles save size, printer, connection, image settings, and calibration.</p>
+          </div>
+        </section>
+
 <section class="panel sidebar-section" data-section-id="size">
           <button class="panel-head section-toggle" type="button" aria-expanded="true">
             <h2>Label Size</h2>
@@ -241,6 +265,27 @@
               <input id="customHeight" type="number" placeholder="Height mm" />
             </div>
             <button id="applyCustomSize" class="ghost top-gap" type="button">Apply</button>
+            <div class="panel-head nested-head top-gap">
+              <h2>Calibration</h2>
+            </div>
+            <div class="grid two top-gap">
+              <label class="field">
+                <span>X Offset mm</span>
+                <input id="printOffsetX" type="number" min="-30" max="30" step="0.1" value="0" />
+              </label>
+              <label class="field">
+                <span>Y Offset mm</span>
+                <input id="printOffsetY" type="number" min="-30" max="30" step="0.1" value="0" />
+              </label>
+            </div>
+            <label class="field top-gap">
+              <span>Scale</span>
+              <input id="printScale" type="number" min="0.5" max="1.5" step="0.01" value="1" />
+            </label>
+            <div class="grid two top-gap">
+              <button id="resetCalibrationButton" class="ghost" type="button">Reset</button>
+              <button id="printCalibrationButton" class="ghost" type="button">Print Test</button>
+            </div>
           </div>
         </section>
 
@@ -277,6 +322,10 @@
             </div>
             <button id="stopPrintButton" class="ghost" disabled>
               Stop
+            </button>
+
+            <button id="multiPrintButton" class="ghost large">
+              Print Multi
             </button>
 
             <button id="printButton" class="primary large">
@@ -394,6 +443,15 @@
         </ul>
 
         <button id="closeHelp" class="primary">Close</button>
+      </div>
+    </div>
+
+    <div id="releaseNotesOverlay" class="help-overlay hidden">
+      <div class="help-card release-notes-card">
+        <p class="eyebrow">Update Installed</p>
+        <h2 id="releaseNotesTitle">What is New</h2>
+        <ul id="releaseNotesList"></ul>
+        <button id="closeReleaseNotes" class="primary">Got it</button>
       </div>
     </div>
 

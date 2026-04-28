@@ -34,15 +34,71 @@ const state = {
   lastCanvasClickIndex: null,
   lastCanvasClickAt: 0,
   savedDesigns: [],
+  printerProfiles: [],
+  appVersion: "",
 };
 
 const elements = {};
 const APP_NAME = "Pigeon Label Maker";
+const PRINTER_PROFILES_KEY = "printer_profiles";
+const RELEASE_NOTES_SEEN_KEY = "release_notes_seen_version";
+const RELEASE_NOTES = {
+  "1.1.6": [
+    "Added printer profiles for repeated printer, label, connection, image, and calibration setups.",
+    "Added print calibration controls for X offset, Y offset, scale, reset, and test print.",
+    "Added one-time release notes after updates.",
+    "Added the app version to the window title.",
+  ],
+};
 
 document.title = APP_NAME;
 
 function $(id) {
   return document.getElementById(id);
+}
+
+async function loadAppVersion() {
+  if (!window.pigeonApi?.getAppVersion) {
+    return;
+  }
+
+  try {
+    state.appVersion = await window.pigeonApi.getAppVersion();
+    document.title = `${APP_NAME} v${state.appVersion}`;
+  } catch (error) {
+    log(`Version lookup failed: ${error.message}`);
+  }
+}
+
+function releaseNotesForVersion(version) {
+  return RELEASE_NOTES[version] || ["General improvements, fixes, and stability updates."];
+}
+
+function showReleaseNotesIfNeeded() {
+  if (!state.appVersion || !elements.releaseNotesOverlay) {
+    return;
+  }
+
+  const seenVersion = localStorage.getItem(RELEASE_NOTES_SEEN_KEY);
+  if (seenVersion === state.appVersion) {
+    return;
+  }
+
+  elements.releaseNotesTitle.textContent = `What is New in ${state.appVersion}`;
+  elements.releaseNotesList.innerHTML = "";
+  for (const note of releaseNotesForVersion(state.appVersion)) {
+    const item = document.createElement("li");
+    item.textContent = note;
+    elements.releaseNotesList.appendChild(item);
+  }
+  elements.releaseNotesOverlay.classList.remove("hidden");
+}
+
+function closeReleaseNotes() {
+  if (state.appVersion) {
+    localStorage.setItem(RELEASE_NOTES_SEEN_KEY, state.appVersion);
+  }
+  elements.releaseNotesOverlay.classList.add("hidden");
 }
 
 function applyTheme(theme) {
@@ -2227,6 +2283,46 @@ function applyCustomSize() {
   queueSave();
 }
 
+function resetCalibration() {
+  state.settings.print_offset_x_mm = 0;
+  state.settings.print_offset_y_mm = 0;
+  state.settings.print_scale = 1;
+  syncForm();
+  queueSave();
+  queuePreview();
+  setStatus("Calibration reset");
+}
+
+async function runCalibrationPrint() {
+  try {
+    clearError();
+    readFormIntoState();
+    const error = validateBeforePrint();
+    if (error) {
+      showError(error);
+      return;
+    }
+
+    setBusy(true, "Printing calibration...");
+    const result = await safeRequest("testPrint", {
+      settings: buildRasterRenderSettings({ copies: 1 }),
+    });
+
+    updateConnectionTestBadge("pass");
+    addPrintHistory(true, "Calibration print successful");
+    setStatus("Calibration printed");
+    if (result?.mode === "BLE") {
+      log(`Calibration sent over BLE to ${state.settings.ble_device_name || state.settings.ble_device_address}`);
+    }
+  } catch (error) {
+    updateConnectionTestBadge("fail");
+    showError(error.message);
+    addPrintHistory(false, error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
 function applyExpiryLabel(dateValue = elements.expiryDate.value) {
   const formattedDate = formatExpiryDate(dateValue);
   if (!formattedDate) {
@@ -2259,10 +2355,18 @@ function initElements() {
     themeToggle: $("themeToggle"),
     modeToggle: $("modeToggle"),
     helpButton: $("helpButton"),
+    checkUpdatesButton: $("checkUpdatesButton"),
+    downloadUpdateButton: $("downloadUpdateButton"),
+    installUpdateButton: $("installUpdateButton"),
+    updateStatus: $("updateStatus"),
     onboardingOverlay: $("onboardingOverlay"),
     closeOnboarding: $("closeOnboarding"),
     helpOverlay: $("helpOverlay"),
     closeHelp: $("closeHelp"),
+    releaseNotesOverlay: $("releaseNotesOverlay"),
+    releaseNotesTitle: $("releaseNotesTitle"),
+    releaseNotesList: $("releaseNotesList"),
+    closeReleaseNotes: $("closeReleaseNotes"),
     recentLabels: $("recentLabels"),
     printHistory: $("printHistory"),
       expiryDate: $("expiryDate"),
@@ -2298,9 +2402,18 @@ function initElements() {
       saveDesignButton: $("saveDesignButton"),
       loadDesignButton: $("loadDesignButton"),
       savedDesigns: $("savedDesigns"),
+      printerProfileSelect: $("printerProfileSelect"),
+      applyPrinterProfileButton: $("applyPrinterProfileButton"),
+      savePrinterProfileButton: $("savePrinterProfileButton"),
+      deletePrinterProfileButton: $("deletePrinterProfileButton"),
       customWidth: $("customWidth"),
       customHeight: $("customHeight"),
       applyCustomSize: $("applyCustomSize"),
+      printOffsetX: $("printOffsetX"),
+      printOffsetY: $("printOffsetY"),
+      printScale: $("printScale"),
+      resetCalibrationButton: $("resetCalibrationButton"),
+      printCalibrationButton: $("printCalibrationButton"),
     copies: $("copies"),
     copiesPlus: $("copiesPlus"),
     copiesMinus: $("copiesMinus"),
@@ -2312,6 +2425,7 @@ function initElements() {
     connectBleButton: $("connectBleButton"),
     disconnectBleButton: $("disconnectBleButton"),
     stopPrintButton: $("stopPrintButton"),
+    multiPrintButton: $("multiPrintButton"),
     printButton: $("printButton"),
     designCanvasViewport: $("designCanvasViewport"),
     designCanvas: $("designCanvas"),
@@ -2330,6 +2444,84 @@ function setStatus(text) {
   elements.appStatus.textContent = text;
 }
 
+function handleUpdateStatus(payload = {}) {
+  if (!elements.updateStatus) {
+    return;
+  }
+
+  const message = payload.message || "Update status unavailable";
+  elements.updateStatus.textContent = `Updates: ${message}`;
+
+  if (elements.downloadUpdateButton) {
+    elements.downloadUpdateButton.classList.toggle("hidden", payload.status !== "available");
+  }
+
+  if (elements.installUpdateButton) {
+    elements.installUpdateButton.classList.toggle("hidden", payload.status !== "downloaded");
+  }
+}
+
+function formatUpdateMessage(error, fallback) {
+  const message = String(error?.message || error || "");
+
+  if (message.includes("No published versions on GitHub")) {
+    return "No update release published yet";
+  }
+
+  if (message.includes("update:check")) {
+    return "Update check failed";
+  }
+
+  return message || fallback;
+}
+
+async function checkForAppUpdates() {
+  if (!window.pigeonApi?.checkForUpdates) {
+    handleUpdateStatus({ status: "error", message: "Updates are not available" });
+    return;
+  }
+
+  handleUpdateStatus({ status: "checking", message: "Checking for updates..." });
+
+  try {
+    const result = await window.pigeonApi.checkForUpdates();
+    if (result) {
+      handleUpdateStatus(result);
+    }
+  } catch (error) {
+    handleUpdateStatus({ status: "error", message: formatUpdateMessage(error, "Update check failed") });
+  }
+}
+
+async function downloadAppUpdate() {
+  if (!window.pigeonApi?.downloadUpdate) {
+    handleUpdateStatus({ status: "error", message: "Updates are not available" });
+    return;
+  }
+
+  try {
+    const result = await window.pigeonApi.downloadUpdate();
+    if (result) {
+      handleUpdateStatus(result);
+    }
+  } catch (error) {
+    handleUpdateStatus({ status: "error", message: formatUpdateMessage(error, "Update download failed") });
+  }
+}
+
+async function installAppUpdate() {
+  if (!window.pigeonApi?.installUpdate) {
+    handleUpdateStatus({ status: "error", message: "Updates are not available" });
+    return;
+  }
+
+  try {
+    await window.pigeonApi.installUpdate();
+  } catch (error) {
+    handleUpdateStatus({ status: "error", message: formatUpdateMessage(error, "Update install failed") });
+  }
+}
+
 function setBusy(busy, text) {
   state.busy = busy;
   if (text) {
@@ -2342,7 +2534,12 @@ function setBusy(busy, text) {
     elements.scanBleButton,
     elements.connectBleButton,
     elements.disconnectBleButton,
+    elements.checkUpdatesButton,
+    elements.downloadUpdateButton,
+    elements.installUpdateButton,
+    elements.printCalibrationButton,
     elements.printButton,
+    elements.multiPrintButton,
   ];
   for (const control of controls) {
     control.disabled = busy;
@@ -2459,6 +2656,124 @@ function fillSelect(select, items, getValue, getLabel) {
   }
 }
 
+function loadPrinterProfiles() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PRINTER_PROFILES_KEY) || "[]");
+    state.printerProfiles = Array.isArray(parsed) ? parsed : [];
+  } catch (_error) {
+    state.printerProfiles = [];
+  }
+  renderPrinterProfiles();
+}
+
+function savePrinterProfiles() {
+  localStorage.setItem(PRINTER_PROFILES_KEY, JSON.stringify(state.printerProfiles));
+}
+
+function profileSettingsSnapshot() {
+  readFormIntoState();
+  return {
+    label_width_mm: state.settings.label_width_mm,
+    label_height_mm: state.settings.label_height_mm,
+    gap_mm: state.settings.gap_mm,
+    print_dpi: state.settings.print_dpi,
+    density: state.settings.density,
+    print_offset_x_mm: state.settings.print_offset_x_mm || 0,
+    print_offset_y_mm: state.settings.print_offset_y_mm || 0,
+    print_scale: state.settings.print_scale || 1,
+    output_mode: state.settings.output_mode,
+    port: state.settings.port,
+    baud_rate: 115200,
+    ble_device_name: state.settings.ble_device_name,
+    ble_device_address: state.settings.ble_device_address,
+    ble_write_char_uuid: state.settings.ble_write_char_uuid,
+    image_mode: state.settings.image_mode,
+    brightness: state.settings.brightness,
+    contrast: state.settings.contrast,
+    threshold: state.settings.threshold,
+    invert: state.settings.invert,
+    auto_image: state.settings.auto_image,
+    edge_enhance: state.settings.edge_enhance,
+    font_name: state.settings.font_name,
+  };
+}
+
+function renderPrinterProfiles() {
+  if (!elements.printerProfileSelect) {
+    return;
+  }
+
+  elements.printerProfileSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = state.printerProfiles.length ? "Choose profile" : "No profiles saved";
+  elements.printerProfileSelect.appendChild(placeholder);
+
+  for (const profile of state.printerProfiles) {
+    const option = document.createElement("option");
+    option.value = profile.id;
+    option.textContent = profile.name;
+    elements.printerProfileSelect.appendChild(option);
+  }
+}
+
+function savePrinterProfile() {
+  const name = window.prompt("Profile name", "My Printer");
+  if (!name || !name.trim()) {
+    return;
+  }
+
+  const cleanName = name.trim();
+  const existing = state.printerProfiles.find((profile) => profile.name.toLowerCase() === cleanName.toLowerCase());
+  const nextProfile = {
+    id: existing?.id || String(Date.now()),
+    name: cleanName,
+    settings: profileSettingsSnapshot(),
+  };
+
+  if (existing) {
+    existing.settings = nextProfile.settings;
+  } else {
+    state.printerProfiles.push(nextProfile);
+  }
+
+  savePrinterProfiles();
+  renderPrinterProfiles();
+  elements.printerProfileSelect.value = nextProfile.id;
+  setStatus("Profile saved");
+}
+
+function applyPrinterProfile() {
+  const selectedId = elements.printerProfileSelect.value;
+  const profile = state.printerProfiles.find((item) => item.id === selectedId);
+  if (!profile) {
+    showError("Choose a printer profile first");
+    return;
+  }
+
+  clearError();
+  Object.assign(state.settings, profile.settings);
+  state.settings.baud_rate = 115200;
+  state.comConnected = false;
+  state.comConnecting = false;
+  syncForm();
+  queueSave();
+  queuePreview();
+  setStatus(`Profile applied: ${profile.name}`);
+}
+
+function deletePrinterProfile() {
+  const selectedId = elements.printerProfileSelect.value;
+  if (!selectedId) {
+    return;
+  }
+
+  state.printerProfiles = state.printerProfiles.filter((profile) => profile.id !== selectedId);
+  savePrinterProfiles();
+  renderPrinterProfiles();
+  setStatus("Profile deleted");
+}
+
 async function runComConnect() {
   try {
     clearError();
@@ -2560,6 +2875,9 @@ function syncForm() {
   elements.copies.value = state.settings.copies;
   elements.customWidth.value = String(state.settings.label_width_mm ?? "");
   elements.customHeight.value = String(state.settings.label_height_mm ?? "");
+  elements.printOffsetX.value = String(state.settings.print_offset_x_mm ?? 0);
+  elements.printOffsetY.value = String(state.settings.print_offset_y_mm ?? 0);
+  elements.printScale.value = String(state.settings.print_scale ?? 1);
   if (elements.expiryDate && !elements.expiryDate.value) {
     elements.expiryDate.value = "";
   }
@@ -2601,6 +2919,9 @@ function forceSimpleDefaults() {
   }
   state.settings.baud_rate = 115200;
   state.settings.invert = false;
+  state.settings.print_offset_x_mm = Number(state.settings.print_offset_x_mm) || 0;
+  state.settings.print_offset_y_mm = Number(state.settings.print_offset_y_mm) || 0;
+  state.settings.print_scale = Math.max(0.5, Math.min(1.5, Number(state.settings.print_scale) || 1));
 }
 
 function readFormIntoState() {
@@ -2621,6 +2942,9 @@ function readFormIntoState() {
   state.settings.brightness = Number(elements.brightness.value) || 1;
   state.settings.contrast = Number(elements.contrast.value) || 2;
   state.settings.threshold = Number(elements.threshold.value) || 180;
+  state.settings.print_offset_x_mm = Number(elements.printOffsetX.value) || 0;
+  state.settings.print_offset_y_mm = Number(elements.printOffsetY.value) || 0;
+  state.settings.print_scale = Math.max(0.5, Math.min(1.5, Number(elements.printScale.value) || 1));
   state.settings.layer1.mode = elements.layer1Mode.value || "Text";
   state.settings.layer1.align = elements.layer1Align.value;
   state.settings.copies = Math.max(1, Number(elements.copies.value) || 1);
@@ -2818,6 +3142,16 @@ async function refreshBleState() {
 }
 
 async function runPrint() {
+  return runPrintJob({ copies: 1, isMulti: false });
+}
+
+async function runMultiPrint() {
+  readFormIntoState();
+  const requestedCopies = Math.max(1, Number(state.settings.copies) || 1);
+  return runPrintJob({ copies: requestedCopies, isMulti: true });
+}
+
+async function runPrintJob({ copies, isMulti }) {
   try {
     clearError();
     readFormIntoState();
@@ -2827,33 +3161,27 @@ async function runPrint() {
       return;
     }
 
-    const total = state.settings.copies || 1;
+    const total = Math.max(1, Number(copies) || 1);
     state.printStopRequested = false;
 
-    state.printQueueActive = true;
-    setBusy(true, "Printing...");
-    startPrintProgress(total);
+    state.printQueueActive = false;
+    setBusy(true, isMulti ? "Printing copies..." : "Printing...");
+    if (isMulti) {
+      startPrintProgress(total);
+    }
     renderCanvasFromState();
     const imageData = await captureCanvasImage();
     const rasterSettings = buildRasterRenderSettings();
 
-    let lastResult = null;
-    for (let i = 1; i <= total; i += 1) {
-      if (state.printStopRequested) {
-        break;
-      }
-      lastResult = await safeRequest("print", {
-        settings: { ...rasterSettings, copies: 1 },
-        imagePath: imageData,
-      });
-      updatePrintProgress(i, total);
-      if (i < total && !state.printStopRequested) {
-        await new Promise((resolve) => setTimeout(resolve, getPrintQueueDelayMs()));
-      }
+    const lastResult = await safeRequest("print", {
+      settings: { ...rasterSettings, copies: total },
+      imagePath: imageData,
+    });
+    if (isMulti) {
+      updatePrintProgress(total, total);
     }
 
     if (lastResult) {
-      await refreshBleState();
       updateConnectionTestBadge("pass");
       if (lastResult?.mode === "BLE") {
         log(
@@ -2865,16 +3193,10 @@ async function runPrint() {
     }
 
     stopPrintProgress();
-    if (state.printStopRequested) {
-      addPrintHistory(false, "Print queue stopped");
-      setStatus("Print queue stopped");
-      log("Print queue stopped by user");
-    } else {
-      saveRecentLabel(state.canvasItems.find((item) => item.type === "text")?.text || "");
-      addPrintHistory(true, "Print successful");
-      setStatus("Printed successfully");
-      showPrintSuccess();
-    }
+    saveRecentLabel(state.canvasItems.find((item) => item.type === "text")?.text || "");
+    addPrintHistory(true, isMulti ? `Printed ${total} copies` : "Print successful");
+    setStatus(isMulti ? `Printed ${total} copies` : "Printed successfully");
+    showPrintSuccess();
   } catch (error) {
     log(`Print failed: ${error.message}`);
     updateConnectionTestBadge("fail");
@@ -3000,6 +3322,9 @@ function attachFormListeners() {
     elements.copies,
     elements.portSelect,
     elements.bleDeviceSelect,
+    elements.printOffsetX,
+    elements.printOffsetY,
+    elements.printScale,
   ];
 
   for (const input of inputs) {
@@ -3146,6 +3471,10 @@ function attachFormListeners() {
     elements.themeToggle.addEventListener("click", toggleTheme);
   elements.modeToggle.addEventListener("click", toggleMode);
   elements.helpButton.addEventListener("click", openHelp);
+  elements.checkUpdatesButton.addEventListener("click", checkForAppUpdates);
+  elements.downloadUpdateButton.addEventListener("click", downloadAppUpdate);
+  elements.installUpdateButton.addEventListener("click", installAppUpdate);
+  elements.closeReleaseNotes.addEventListener("click", closeReleaseNotes);
   elements.closeOnboarding.addEventListener("click", closeOnboarding);
   elements.closeHelp.addEventListener("click", closeHelp);
   elements.addTextButton.addEventListener("click", () => addItem("text"));
@@ -3192,6 +3521,11 @@ function attachFormListeners() {
   elements.copiesPlus.addEventListener("click", () => adjustCopies(1));
   elements.copiesMinus.addEventListener("click", () => adjustCopies(-1));
   elements.applyCustomSize.addEventListener("click", applyCustomSize);
+  elements.resetCalibrationButton.addEventListener("click", resetCalibration);
+  elements.printCalibrationButton.addEventListener("click", runCalibrationPrint);
+  elements.savePrinterProfileButton.addEventListener("click", savePrinterProfile);
+  elements.applyPrinterProfileButton.addEventListener("click", applyPrinterProfile);
+  elements.deletePrinterProfileButton.addEventListener("click", deletePrinterProfile);
   elements.applyExpiryButton.addEventListener("click", () => applyExpiryLabel());
   elements.expiryDate.addEventListener("change", () => {
     clearError();
@@ -3203,6 +3537,7 @@ function attachFormListeners() {
   elements.connectBleButton.addEventListener("click", runBleConnect);
   elements.disconnectBleButton.addEventListener("click", runBleDisconnect);
   elements.stopPrintButton.addEventListener("click", requestStopPrintQueue);
+  elements.multiPrintButton.addEventListener("click", runMultiPrint);
   elements.printButton.addEventListener("click", runPrint);
 
   document.querySelectorAll("[data-size]").forEach((button) => {
@@ -3257,6 +3592,10 @@ function attachFormListeners() {
 async function boot() {
     loadTheme();
     initElements();
+    await loadAppVersion();
+    if (window.pigeonApi?.onUpdateStatus) {
+      window.pigeonApi.onUpdateStatus(handleUpdateStatus);
+    }
     initSidebarCollapsibles();
     attachCanvasInteractions();
     loadMode();
@@ -3281,6 +3620,7 @@ async function boot() {
     forceSimpleDefaults();
     await loadFonts();
     loadSavedDesigns();
+    loadPrinterProfiles();
     renderRecentLabels();
     renderPrintHistory();
     await refreshPorts();
@@ -3310,6 +3650,7 @@ async function boot() {
     updateCanvasActionButtons();
     await updatePreview();
     setStatus("Ready");
+    showReleaseNotesIfNeeded();
   }
 
 boot().catch((error) => {

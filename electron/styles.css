@@ -286,6 +286,11 @@ body {
   margin: 10px 0;
 }
 
+.release-notes-card li {
+  margin-bottom: 8px;
+  line-height: 1.35;
+}
+
 .brand-card h1,
 .preview-head h3,
 .panel-head h2 {
@@ -376,6 +381,13 @@ button.panel-head h2 {
   margin-top: 18px;
 }
 
+.update-status {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -404,6 +416,15 @@ button.panel-head h2 {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.nested-head {
+  margin-bottom: 0;
+}
+
+.nested-head h2 {
+  font-size: 0.85rem;
+  color: var(--accent);
 }
 
 .grid {

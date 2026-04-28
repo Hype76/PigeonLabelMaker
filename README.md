@@ -15,6 +15,9 @@ Pigeon Label Maker is a Windows label design and thermal printing app for small 
 - Undo, redo, duplicate, lock, layer order, and keyboard nudge tools
 - Expiry label helper and quick symbol picker
 - Saved design thumbnails and PNG export
+- Printer profiles for repeated printer and label setups
+- Print calibration with X offset, Y offset, scale, and calibration test print
+- First-launch release notes after updates
 - Windows installer build via Electron Builder and PyInstaller
 
 ## Main Features
@@ -35,6 +38,7 @@ Pigeon Label Maker is a Windows label design and thermal printing app for small 
 
 - The Electron app captures the design canvas and sends that image to the Python backend
 - Preview and print use the same captured canvas image path
+- Print calibration can shift and scale the final processed output
 - Thermal image processing supports:
   - threshold mode for clean logo-style output
   - dither mode for photo-like output
@@ -46,6 +50,7 @@ Pigeon Label Maker is a Windows label design and thermal printing app for small 
 - BLE scan, connect, disconnect, inspect, battery query, and print
 - Persistent connection handling so normal print jobs do not intentionally tear down the printer session
 - COM speed is fixed to `115200` in the Electron UI
+- Printer profiles store repeated COM, BLE, label size, image, and calibration setups
 - Connection feedback includes connection status, timer, test badge, and BLE battery panel
 - BLE battery now prefers showing `Unknown` over a false dead reading when the printer does not expose a reliable value
 
@@ -61,6 +66,8 @@ Pigeon Label Maker is a Windows label design and thermal printing app for small 
 - Print success pulse
 - Connection type, status, and timer in the action bar
 - Three-column layout with the Connection panel on the right
+- App version shown in the window title
+- One-time update notes after installing a new version
 
 ## Project Structure
 
@@ -202,6 +209,32 @@ Expected outputs:
 
 - frozen backend in `python-dist/`
 - Windows installer in `dist/`
+
+## Publish Updates with GitHub Releases
+
+Auto-update is powered by Electron Builder and GitHub Releases.
+
+For a normal local installer build:
+
+```powershell
+npm run build
+```
+
+For a release that installed apps can detect:
+
+```powershell
+$env:GH_TOKEN="your_github_token"
+npm run release
+```
+
+Release notes:
+
+- bump the `version` in `package.json` before publishing
+- add release notes for the new version in `electron/renderer.js`
+- the GitHub token needs permission to create releases in `Hype76/PigeonLabelMaker`
+- installed builds can use `Check Updates` in the App panel
+- development mode shows that updates only work in the installed app
+- uploaded release assets should include the installer and generated update metadata from `dist/`
 
 ## Troubleshooting
 

@@ -35,6 +35,9 @@ class AppSettings:
     port: str = ""
     copies: int = 1
     density: int = 10
+    print_offset_x_mm: float = 0.0
+    print_offset_y_mm: float = 0.0
+    print_scale: float = 1.0
     brightness: float = 1.0
     contrast: float = 2.0
     threshold: int = 180
