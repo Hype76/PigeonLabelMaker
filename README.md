@@ -236,6 +236,7 @@ Release notes:
 - development mode shows that updates only work in the installed app
 - uploaded release assets should include the installer and generated update metadata from `dist/`
 - updater errors are shortened in the App panel so raw GitHub responses are not shown to users
+- installed apps read update metadata from `https://github.com/Hype76/PigeonLabelMaker/releases/latest/download/latest.yml`
 
 ## Troubleshooting
 

@@ -1,6 +1,6 @@
 {
   "name": "pigeon-label-maker",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "private": true,
   "author": "Pigeon Label Maker",
   "description": "Electron shell for the Pigeon Label Maker Python backend",

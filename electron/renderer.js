@@ -52,6 +52,9 @@ const RELEASE_NOTES = {
   "1.1.7": [
     "Cleaned up update check errors so raw GitHub responses never appear in the sidebar.",
   ],
+  "1.1.8": [
+    "Changed update checks to read update metadata directly from GitHub Release assets.",
+  ],
 };
 
 document.title = APP_NAME;
@@ -2474,9 +2477,11 @@ function cleanUpdateStatusMessage(message) {
     lower.includes("unable to find latest version on github") ||
     lower.includes("cannot parse releases feed") ||
     lower.includes("httperror: 406") ||
+    lower.includes("httperror: 404") ||
+    lower.includes("status code: 404") ||
     lower.includes("/releases/latest")
   ) {
-    return "No published update release found yet";
+    return "Update release assets are missing or private";
   }
 
   if (lower.includes("cannot find channel") || lower.includes("latest.yml")) {

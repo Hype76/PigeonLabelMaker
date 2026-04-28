@@ -148,9 +148,11 @@ function formatUpdateError(error) {
     lower.includes("unable to find latest version on github") ||
     lower.includes("cannot parse releases feed") ||
     lower.includes("httperror: 406") ||
+    lower.includes("httperror: 404") ||
+    lower.includes("status code: 404") ||
     lower.includes("/releases/latest")
   ) {
-    return "No published update release found yet";
+    return "Update release assets are missing or private";
   }
 
   if (lower.includes("cannot find channel") || lower.includes("latest.yml")) {
@@ -167,6 +169,10 @@ function formatUpdateError(error) {
 function setupAutoUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.setFeedURL({
+    provider: "generic",
+    url: "https://github.com/Hype76/PigeonLabelMaker/releases/latest/download",
+  });
 
   autoUpdater.on("checking-for-update", () => {
     sendUpdateStatus({ status: "checking", message: "Checking for updates..." });
