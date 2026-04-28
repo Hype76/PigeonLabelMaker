@@ -49,6 +49,9 @@ const RELEASE_NOTES = {
     "Added one-time release notes after updates.",
     "Added the app version to the window title.",
   ],
+  "1.1.7": [
+    "Cleaned up update check errors so raw GitHub responses never appear in the sidebar.",
+  ],
 };
 
 document.title = APP_NAME;
@@ -2449,8 +2452,9 @@ function handleUpdateStatus(payload = {}) {
     return;
   }
 
-  const message = payload.message || "Update status unavailable";
+  const message = cleanUpdateStatusMessage(payload.message || "Update status unavailable");
   elements.updateStatus.textContent = `Updates: ${message}`;
+  elements.updateStatus.title = message;
 
   if (elements.downloadUpdateButton) {
     elements.downloadUpdateButton.classList.toggle("hidden", payload.status !== "available");
@@ -2461,18 +2465,39 @@ function handleUpdateStatus(payload = {}) {
   }
 }
 
-function formatUpdateMessage(error, fallback) {
-  const message = String(error?.message || error || "");
+function cleanUpdateStatusMessage(message) {
+  const text = String(message || "");
+  const lower = text.toLowerCase();
 
-  if (message.includes("No published versions on GitHub")) {
-    return "No update release published yet";
+  if (
+    lower.includes("no published versions on github") ||
+    lower.includes("unable to find latest version on github") ||
+    lower.includes("cannot parse releases feed") ||
+    lower.includes("httperror: 406") ||
+    lower.includes("/releases/latest")
+  ) {
+    return "No published update release found yet";
   }
 
-  if (message.includes("update:check")) {
+  if (lower.includes("cannot find channel") || lower.includes("latest.yml")) {
+    return "Update metadata is missing from the release";
+  }
+
+  if (lower.includes("update:check")) {
     return "Update check failed";
   }
 
-  return message || fallback;
+  if (text.length > 120) {
+    return "Update check failed";
+  }
+
+  return text;
+}
+
+function formatUpdateMessage(error, fallback) {
+  const message = String(error?.message || error || "");
+
+  return cleanUpdateStatusMessage(message || fallback);
 }
 
 async function checkForAppUpdates() {

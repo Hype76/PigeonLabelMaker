@@ -141,20 +141,27 @@ function sendUpdateStatus(payload) {
 
 function formatUpdateError(error) {
   const message = String(error?.message || error || "");
+  const lower = message.toLowerCase();
 
-  if (message.includes("No published versions on GitHub")) {
-    return "No update release published yet";
+  if (
+    lower.includes("no published versions on github") ||
+    lower.includes("unable to find latest version on github") ||
+    lower.includes("cannot parse releases feed") ||
+    lower.includes("httperror: 406") ||
+    lower.includes("/releases/latest")
+  ) {
+    return "No published update release found yet";
   }
 
-  if (message.includes("Cannot find channel")) {
+  if (lower.includes("cannot find channel") || lower.includes("latest.yml")) {
     return "Update metadata is missing from the release";
   }
 
-  if (message.includes("net::ERR_INTERNET_DISCONNECTED")) {
+  if (lower.includes("net::err_internet_disconnected")) {
     return "No internet connection";
   }
 
-  return message || "Update check failed";
+  return "Update check failed";
 }
 
 function setupAutoUpdater() {
